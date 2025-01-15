@@ -1,0 +1,45 @@
+---
+detect:
+  lane:
+    yellow:
+      hue_l: 90
+      hue_h: 146
+      saturation_l: 38
+      saturation_h: 255
+      lightness_l: 95
+      lightness_h: 255
+    white:
+      hue_l: 90
+      hue_h: 146
+      saturation_l: 38
+      saturation_h: 255
+      lightness_l: 95
+      lightness_h: 255
+
+
+
+# #blue
+#       white:
+#       hue_l: 90
+#       hue_h: 146
+#       saturation_l: 38
+#       saturation_h: 255
+#       lightness_l: 95
+#       lightness_h: 255
+
+# #real white
+# white:
+#       hue_l: 0
+#       hue_h: 179
+#       saturation_l: 0
+#       saturation_h: 9
+#       lightness_l: 95
+#       lightness_h: 255
+
+# yellow:
+#       hue_l: 0
+#       hue_h: 70
+#       saturation_l: 93
+#       saturation_h: 255
+#       lightness_l: 105
+#       lightness_h: 255

@@ -1,0 +1,14 @@
+---
+# camera:
+#   extrinsic_camera_calibration:
+#     top_x:  358
+#     top_y: 115
+#     bottom_x: 888
+#     bottom_y: 564
+camera:
+  extrinsic_camera_calibration:
+    top_x:  119
+    top_y: 20
+    bottom_x: 162
+    bottom_y: 121
+    
