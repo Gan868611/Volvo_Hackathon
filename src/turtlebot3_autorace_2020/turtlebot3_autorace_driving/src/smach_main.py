@@ -111,6 +111,12 @@ class LocalizationState(smach.State):
         position_param = rospy.get_param('~start_position', 1)  # Defaults to parking_1 if not set
         filename = f"parking_{position_param}.yaml"
 
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(5): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
+
         # Read the pose data from the file
         pose_data = self.read_initial_pose(filename)
         if not pose_data:
@@ -328,23 +334,23 @@ class GantryInteractionExit(smach.State):
 
         # Step 1: Open the gantry
         rospy.loginfo("Sending command to open the gantry...")
-        #self.send_command("open")
+        self.send_command("open")
 
          # Wait for the gantry to open (adjust if needed)
         # Stop the robot 20x0.1seconds
-        # twist = Twist()
-        # twist.linear.x = 0.0
-        # for _ in range(10): 
-        #     self.cmd_vel_pub.publish(twist)
-        #     rospy.sleep(0.1)
-        # rospy.sleep(0.2)
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(10): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
+        rospy.sleep(0.2)
         
         # Step 2: Move forward through the gantry
         rospy.loginfo("Moving forward through the gantry.")
         msg_moving = MovingParam()
         msg_moving.moving_type = TypeOfMoving.forward.value
         msg_moving.moving_value_angular = 0
-        msg_moving.moving_value_linear = 0.18  # Move forward 50 cm
+        msg_moving.moving_value_linear = 0.25  # Move forward 50 cm
         self.pub_moving.publish(msg_moving)
         if not self.wait_for_completion():
             rospy.logerr("Failed to move forward through the gantry.")
@@ -354,14 +360,14 @@ class GantryInteractionExit(smach.State):
 
         # Step 3: Close the gantry
         rospy.loginfo("Sending command to close the gantry...")
-        #self.send_command("close")
+        self.send_command("close")
         # Wait for the gantry to close (adjust if needed)
         # Stop the robot 20x0.1seconds
-        # twist = Twist()
-        # twist.linear.x = 0.0
-        # for _ in range(10): 
-        #     self.cmd_vel_pub.publish(twist)
-        #     rospy.sleep(0.1)
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(10): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
 
         rospy.loginfo("Exiting gantry. Proceeding to direction detection.")
         return 'proceed_to_direction_detection'
@@ -401,7 +407,7 @@ class DirectionDetection(smach.State):
         # Stop the robot 20x0.1seconds
         twist = Twist()
         twist.linear.x = 0.0
-        for _ in range(20): 
+        for _ in range(10): 
             self.cmd_vel_pub.publish(twist)
             rospy.sleep(0.1)
 
@@ -423,7 +429,7 @@ class DirectionDetection(smach.State):
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.forward.value
             msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.15
+            msg_moving.moving_value_linear = 0.10
             self.pub_moving.publish(msg_moving)
             if not self.wait_for_completion():
                 return 'turn_completed'
@@ -433,7 +439,7 @@ class DirectionDetection(smach.State):
             # Step 2: Turn left
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.left.value
-            msg_moving.moving_value_angular = 90
+            msg_moving.moving_value_angular = 80
             msg_moving.moving_value_linear = 0
             self.pub_moving.publish(msg_moving)
             if not self.wait_for_completion():
@@ -445,7 +451,7 @@ class DirectionDetection(smach.State):
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.forward.value
             msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.25
+            msg_moving.moving_value_linear = 0.15
             self.pub_moving.publish(msg_moving)
             if not self.wait_for_completion():
                 return 'turn_completed'
@@ -458,7 +464,7 @@ class DirectionDetection(smach.State):
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.forward.value
             msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.4
+            msg_moving.moving_value_linear = 0.35
             self.pub_moving.publish(msg_moving)
             if not self.wait_for_completion():
                 return 'turn_completed'
@@ -501,10 +507,12 @@ class LaneFollowing(smach.State):
         self.stop_sign_last_handled_time = rospy.Time(0)  # Initialize to time 0
         self.stop_sign_cooldown = rospy.Duration(10)  # Cool-down period (10 seconds)
         self.current_pose = None
+        self.triangle = False
+        self.triangle_exit = False
 
         # Throttle pose updates
         self.last_pose_update_time = rospy.Time.now()
-        self.pose_update_interval = rospy.Duration(0.5)  # Throttle to 2 Hz
+        self.pose_update_interval = rospy.Duration(0.2)  # Throttle to 2 Hz
 
         # Subscribers
         rospy.Subscriber('/cv_node/car_detected', String, self.car_callback, queue_size=1)
@@ -515,8 +523,8 @@ class LaneFollowing(smach.State):
         # Define locations for both directions
         self.locations_left = {
             'car_park': {'x': 6.0, 'y': 2.0, 'radius': 0.5},
-            'roundabout': {'x': 3.0, 'y': 4.0, 'radius': 0.5},
-            'triangle': {'x': -0.12997154959514903, 'y': -1.7598585083217464, 'radius': 0.1},
+            'roundabout': {'x': 0.9759433904645725, 'y': -1.2787272742149476, 'radius': 0.05},
+            'triangle': {'x': -0.242872143633399, 'y': -1.8601182048765557, 'radius': 0.05},
         }
 
         self.locations_right = {
@@ -591,12 +599,14 @@ class LaneFollowing(smach.State):
                     rospy.loginfo("Ignoring stop sign due to cool-down period.")
 
             # Check proximity to predefined locations
-            if self.check_proximity(locations['roundabout']):
-                rospy.loginfo("Approaching roundabout.")
+            if self.check_proximity(locations['roundabout']) and self.triangle_exit == False:
+                rospy.loginfo("Approaching triangle exit.")
+                self.triangle_exit=True
                 return 'roundabout_detected'
 
-            if self.check_proximity(locations['triangle']):
+            if self.check_proximity(locations['triangle']) and self.triangle == False:
                 rospy.loginfo("Approaching triangle.")
+                self.triangle=True
                 return 'triangle_detected'
 
             if self.check_proximity(locations['car_park']):
@@ -612,6 +622,24 @@ class StopSignHandling(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=['continue_lane_following'])
         self.cmd_vel_pub = rospy.Publisher('/smach_cmd_vel', Twist, queue_size=10)
+        self.pub_moving = rospy.Publisher('/control/moving/state', MovingParam, queue_size=10)
+        self.sub_moving_complete = rospy.Subscriber('/control/moving/complete', UInt8, self.moving_complete_callback, queue_size=1)
+        self.is_moving_complete = False
+
+    def moving_complete_callback(self, data):
+        self.is_moving_complete = True
+
+    def wait_for_completion(self):
+        rate = rospy.Rate(10)
+        timeout = rospy.Time.now() + rospy.Duration(15)
+        while not rospy.is_shutdown():
+            if self.is_moving_complete:
+                self.is_moving_complete = False
+                return True
+            if rospy.Time.now() > timeout:
+                rospy.logwarn("Movement timed out!")
+                return False
+            rate.sleep()
 
     def execute(self, userdata):
         rospy.loginfo("Executing state: StopSignHandling")
@@ -629,6 +657,16 @@ class StopSignHandling(smach.State):
         for _ in range(40): 
             self.cmd_vel_pub.publish(twist)
             rospy.sleep(0.1)
+
+        self.is_moving_complete = False
+        rospy.loginfo("Robot moving forward after stop sign.")
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.forward.value
+        msg_moving.moving_value_angular = 0
+        msg_moving.moving_value_linear = 0.1
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'continue_lane_following'
 
         # Resume lane following
         rospy.loginfo("Resuming lane following.")
@@ -773,40 +811,47 @@ class RoundaboutNavigation(smach.State):
             rate.sleep()
 
     def execute(self, userdata):
-        rospy.loginfo("Executing state: RoundaboutNavigation")
+        # rospy.loginfo("Executing state: RoundaboutNavigation")
+        rospy.loginfo("Executing state: triangle exit")
 
         # Get the turn direction from userdata
         turn_direction = userdata.turn_direction
         rospy.loginfo(f"Received turn direction: {turn_direction}")
 
-        if turn_direction == "left":
-            # Movement for left direction
-            rospy.loginfo("Navigating roundabout for left turn.")
-            # Move forward in the roundabout for left turn
-            msg_moving = MovingParam()
-            msg_moving.moving_type = TypeOfMoving.forward.value
-            msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.5  # Adjust distance for left roundabout
-            self.pub_moving.publish(msg_moving)
-            if not self.wait_for_completion():
-                return 'roundabout_complete'
+        # if turn_direction == "left":
+        #     # Movement for left direction
+        #     rospy.loginfo("Navigating roundabout for left turn.")
+        #     # Move forward in the roundabout for left turn
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.forward.value
+        #     msg_moving.moving_value_angular = 0
+        #     msg_moving.moving_value_linear = 0.5  # Adjust distance for left roundabout
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'roundabout_complete'
 
-            rospy.sleep(1)
+        #     rospy.sleep(1)
 
-        elif turn_direction == "right":
-            # Movement for right direction
-            rospy.loginfo("Navigating roundabout for right turn.")
-            # Move forward in the roundabout for right turn
-            msg_moving = MovingParam()
-            msg_moving.moving_type = TypeOfMoving.forward.value
-            msg_moving.moving_value_linear = 0.7  # Adjust distance for right roundabout
-            self.pub_moving.publish(msg_moving)
-            if not self.wait_for_completion():
-                return 'roundabout_complete'
+        # elif turn_direction == "right":
+        #     # Movement for right direction
+        #     rospy.loginfo("Navigating roundabout for right turn.")
+        #     # Move forward in the roundabout for right turn
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.forward.value
+        #     msg_moving.moving_value_linear = 0.7  # Adjust distance for right roundabout
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'roundabout_complete'
 
-            rospy.sleep(1)
+        #     rospy.sleep(1)
 
-        rospy.loginfo("Roundabout navigation complete.")
+        # rospy.loginfo("Roundabout navigation complete.")
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(40): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
+        rospy.loginfo("Exit triangle done.")
         return 'roundabout_complete'
 
     
@@ -835,7 +880,7 @@ class TriangleNavigation(smach.State):
         # for _ in range(40): 
         #     self.cmd_vel_pub.publish(twist)
         #     rospy.sleep(0.1)
-        # rospy.loginfo("Exited the triangle.")
+        rospy.loginfo("triangle done.")
         return 'triangle_complete'
 
 # Define state ReturnToCarPark

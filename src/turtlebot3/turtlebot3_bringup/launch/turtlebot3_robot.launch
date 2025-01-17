@@ -26,7 +26,7 @@
     <arg name="mode" default="action" />
   </include>
 
-   <include file="$(find turtlebot3_autorace_driving)/launch/turtlebot3_autorace_control_lane.launch"/>
+  <include file="$(find turtlebot3_autorace_driving)/launch/turtlebot3_autorace_control_lane.launch"/>
 
   <!-- roslaunch turtlebot3_autorace_driving turtlebot3_autorace_control_lane.launch -->
 

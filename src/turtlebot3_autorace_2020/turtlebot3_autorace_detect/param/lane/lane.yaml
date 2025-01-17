@@ -2,19 +2,59 @@
 detect:
   lane:
     yellow:
-      hue_l: 0
-      hue_h: 36
-      saturation_l: 46
+      hue_l: 19
+      hue_h: 43
+      saturation_l: 21
       saturation_h: 255
       lightness_l: 105
       lightness_h: 255
     white:
-      hue_l: 90
+      hue_l: 75
       hue_h: 107
-      saturation_l: 63
+      saturation_l: 40
       saturation_h: 255
       lightness_l: 95
       lightness_h: 255
+
+#working
+# yellow:
+#       hue_l: 19
+#       hue_h: 43
+#       saturation_l: 21
+#       saturation_h: 255
+#       lightness_l: 105
+#       lightness_h: 255
+#     blue:
+#       hue_l: 75
+      # hue_h: 107
+      # saturation_l: 70
+      # saturation_h: 255
+      # lightness_l: 95
+      # lightness_h: 255
+
+#     white:
+#       hue_l: 5
+#       hue_h: 37
+#       saturation_l: 0
+#       saturation_h: 255
+#       lightness_l: 95
+#       lightness_h: 255
+    
+
+# yellow:
+#       hue_l: 0
+#       hue_h: 36
+#       saturation_l: 46
+#       saturation_h: 255
+#       lightness_l: 105
+#       lightness_h: 255
+#     blue:
+#       hue_l: 90
+#       hue_h: 107
+#       saturation_l: 63
+#       saturation_h: 255
+#       lightness_l: 95
+#       lightness_h: 255
 
 
 #prev

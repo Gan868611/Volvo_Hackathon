@@ -150,7 +150,7 @@ class ControlMoving():
 
 
     def turn_left(self, msg):
-        rospy.loginfo("turn_left function is called")
+        # rospy.loginfo("turn_left function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
             self.desired_theta = self.current_theta + math.radians(msg.moving_value_angular)
@@ -159,11 +159,11 @@ class ControlMoving():
         error = self.fnTurn()
 
         if math.fabs(error) < 0.05:
-            rospy.loginfo("turn_left function is finished")
+            # rospy.loginfo("turn_left function is finished")
             self.step_completed()
 
     def turn_right(self, msg):
-        rospy.loginfo("turn_right function is called")
+        # rospy.loginfo("turn_right function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
             self.desired_theta = self.current_theta - math.radians(msg.moving_value_angular)
@@ -172,12 +172,12 @@ class ControlMoving():
         error = self.fnTurn()
 
         if math.fabs(error) < 0.05:
-            rospy.loginfo("turn_right function is finished")
+            # rospy.loginfo("turn_right function is finished")
             self.step_completed()
 
 
     def go_forward(self, msg):
-        rospy.loginfo("go_forawrd function is called")
+        # rospy.loginfo("go_forawrd function is called")
         if self.is_step_start == False:
             self.lastErorr = 0.0
             self.start_pos_x = self.current_pos_x
@@ -187,12 +187,12 @@ class ControlMoving():
         error = self.fnStraight(msg.moving_value_linear)
 
         if math.fabs(error) < 0.005:
-            rospy.loginfo("go_forward function is finished")
+            # rospy.loginfo("go_forward function is finished")
             self.step_completed()
 
 
     def go_backward(self, msg):
-        rospy.loginfo("go_backward function is called")
+        # rospy.loginfo("go_backward function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
             self.start_pos_x = self.current_pos_x
@@ -202,7 +202,7 @@ class ControlMoving():
         error = self.fnBackStraight(msg.moving_value_linear)
 
         if math.fabs(error) < 0.005:
-            rospy.loginfo("go_backward function is finished")
+            # rospy.loginfo("go_backward function is finished")
             self.step_completed()
 
 
