@@ -11,7 +11,28 @@
   </include>
   <node pkg="turtlebot3_bringup" type="turtlebot3_diagnostics" name="turtlebot3_diagnostics" output="screen"/>
 
+
   <!-- <group if = "$(eval model == 'waffle_pi')"> -->
   <include file="$(find turtlebot3_bringup)/launch/turtlebot3_rpicamera.launch"/>
   <!-- </group> -->
+
+  <include file="$(find turtlebot3_autorace_camera)/launch/intrinsic_camera_calibration.launch"/>
+
+  <include file="$(find turtlebot3_autorace_camera)/launch/extrinsic_camera_calibration.launch">
+    <arg name="mode" value="action" />
+  </include>
+
+  <include file="$(find turtlebot3_autorace_detect)/launch/detect_lane.launch">
+    <arg name="mode" default="action" />
+  </include>
+
+   <include file="$(find turtlebot3_autorace_driving)/launch/turtlebot3_autorace_control_lane.launch"/>
+
+  <!-- roslaunch turtlebot3_autorace_driving turtlebot3_autorace_control_lane.launch -->
+
+  <include file="$(find turtlebot3_autorace_driving)/launch/turtlebot3_autorace_control_moving.launch"/>
+
+
+  
+
 </launch>

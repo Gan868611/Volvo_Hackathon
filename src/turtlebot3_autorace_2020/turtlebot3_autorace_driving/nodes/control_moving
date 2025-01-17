@@ -35,7 +35,8 @@ class ControlMoving():
         self.sub_moving_state = rospy.Subscriber('/control/moving/state', MovingParam, self.get_param, queue_size = 1)
         self.sub_odom = rospy.Subscriber('/odom', Odometry, self.cbOdom, queue_size=1)
 
-        self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+        # self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
+        self.pub_cmd_vel = rospy.Publisher('/control_moving_cmd_vel', Twist, queue_size = 1)
         self.pub_max_vel = rospy.Publisher('/control/max_vel', Float64, queue_size = 1)
         self.pub_moving_complete = rospy.Publisher('/control/moving/complete', UInt8, queue_size = 1)
 

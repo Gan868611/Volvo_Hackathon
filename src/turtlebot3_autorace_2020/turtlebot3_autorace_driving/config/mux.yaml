@@ -1,0 +1,28 @@
+topics:
+  - name: safety
+    topic: /safety_cmd_vel
+    timeout: 0.5
+    priority: 10  # Highest priority
+
+  - name: smach
+    topic: /smach_cmd_vel
+    timeout: 0.5
+    priority: 9
+
+  - name: control_moving
+    topic: /control_moving_cmd_vel
+    timeout: 1.5
+    priority: 8
+
+  - name: lane_following
+    topic: /lane_following_cmd_vel
+    timeout: 0.5
+    priority: 7  # Lowest priority
+
+locks:
+  - name: safety_lock
+    topic: /pause_navigation
+    timeout: 0.0
+    priority: 0  # Highest priority lock
+
+output: /cmd_vel

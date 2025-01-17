@@ -219,8 +219,8 @@ class DetectLane():
 
         if how_much_short > 100:
             if self.reliability_white_line >= 5:
-                pass
-                # self.reliability_white_line -= 5
+                # pass
+                self.reliability_white_line -= 5
         elif how_much_short <= 100:
             if self.reliability_white_line <= 99:
                 self.reliability_white_line += 5
