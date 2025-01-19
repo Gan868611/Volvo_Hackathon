@@ -1,0 +1,54 @@
+                                 ┌──────────────────────────────────┐
+                                 │        LANE_FOLLOWING MODE      │
+                                 │ (Robot is driving in lane mode) │
+                                 └──────────────┬───────────────────┘
+                                                │
+                 (Parking sign detected)        │
+        (parking_core_mode_decider sets         │
+         current_mode = parking)                ▼
+                                 ┌──────────────────────────────────┐
+                                 │  DECIDER: SWITCH TO “PARKING”   │
+                                 │  (Publish /core/decided_mode=parking
+                                 │   or set current_mode=parking)  │
+                                 └──────────────┬───────────────────┘
+                                                │
+                                                ▼
+                                 ┌──────────────────────────────────┐
+                                 │ CONTROLLER: START PARKING NODES │
+                                 │ - Stop lane_following nodes      │
+                                 │ - Start detect_parking, etc.     │
+                                 │ (fnControlNode() in node_controller) 
+                                 │ Publishes /detect/parking_order=parking
+                                 └──────────────┬───────────────────┘
+                                                │
+                             (Parking maneuver in progress)   (handled in detect_parking)
+                                                │
+                  ┌─────────────────────────────┴─────────────────────────────────────┐
+                  │                                                                  │
+                  │        (Parking finished / “parking_stamped=exit” from parking node) 
+                  │                                                                  │
+                  ▼                                                                  ▼
+ ┌──────────────────────────────────┐                                  ┌─────────────────────────────────────┐
+ │ DECIDER: PARKING -> EXIT STEP   │                                  │ CONTROLLER: EXIT PARKING           │
+ │ (parking_core_mode_decider      │                                  │ - Possibly do final maneuvers      │
+ │  sees “parking_stamped=exit”)   │                                  │ - Publishes /detect/parking_order=exit
+ └──────────────────────────────────┘                                  │ - Switch back to lane_following    │
+                  │                                                   └─────────────────────────────────────┘
+                  │
+                  ▼
+ ┌─────────────────────────────────────────────────────────────────────────────────────┐
+ │ DECIDER: RETURN TO LANE-FOLLOWING                                                │
+ │ - Publishes /core/returned_mode=lane_following                                   │
+ │ - Or sets current_mode=lane_following                                            │
+ │ - Notifies the controller (and entire system) that parking is done.             │
+ └─────────────────────────────────────────────────────────────────────────────────────┘
+                  │
+                  ▼
+ ┌──────────────────────────────────┐
+ │ CONTROLLER: RE-LAUNCH LANE NODES│
+ │ - Shut down parking nodes       │
+ │ - Start detect_lane, lane_control
+ │ - Resume lane following         │
+ └──────────────────────────────────┘
+
+                  ... back to LANE_FOLLOWING ...

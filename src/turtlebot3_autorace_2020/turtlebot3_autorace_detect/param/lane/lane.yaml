@@ -1,0 +1,103 @@
+---
+detect:
+  lane:
+    yellow:
+      hue_l: 19
+      hue_h: 43
+      saturation_l: 21
+      saturation_h: 255
+      lightness_l: 105
+      lightness_h: 255
+    white:
+      hue_l: 75
+      hue_h: 107
+      saturation_l: 40
+      saturation_h: 255
+      lightness_l: 95
+      lightness_h: 255
+
+#working
+# yellow:
+#       hue_l: 19
+#       hue_h: 43
+#       saturation_l: 21
+#       saturation_h: 255
+#       lightness_l: 105
+#       lightness_h: 255
+#     blue:
+#       hue_l: 75
+      # hue_h: 107
+      # saturation_l: 70
+      # saturation_h: 255
+      # lightness_l: 95
+      # lightness_h: 255
+
+#     white:
+#       hue_l: 5
+#       hue_h: 37
+#       saturation_l: 0
+#       saturation_h: 255
+#       lightness_l: 95
+#       lightness_h: 255
+    
+
+# yellow:
+#       hue_l: 0
+#       hue_h: 36
+#       saturation_l: 46
+#       saturation_h: 255
+#       lightness_l: 105
+#       lightness_h: 255
+#     blue:
+#       hue_l: 90
+#       hue_h: 107
+#       saturation_l: 63
+#       saturation_h: 255
+#       lightness_l: 95
+#       lightness_h: 255
+
+
+#prev
+# yellow:
+#       hue_l: 0
+#       hue_h: 33
+#       saturation_l: 70
+#       saturation_h: 143
+#       lightness_l: 105
+#       lightness_h: 255
+#     white:
+#       hue_l: 90
+#       hue_h: 146
+#       saturation_l: 38
+#       saturation_h: 255
+#       lightness_l: 95
+#       lightness_h: 255
+
+
+
+
+# #blue
+#       white:
+#       hue_l: 90
+#       hue_h: 146
+#       saturation_l: 38
+#       saturation_h: 255
+#       lightness_l: 95
+#       lightness_h: 255
+
+# #real white
+# white:
+#       hue_l: 0
+#       hue_h: 179
+#       saturation_l: 0
+#       saturation_h: 9
+#       lightness_l: 95
+#       lightness_h: 255
+
+# yellow:
+#       hue_l: 0
+#       hue_h: 70
+#       saturation_l: 93
+#       saturation_h: 255
+#       lightness_l: 105
+#       lightness_h: 255

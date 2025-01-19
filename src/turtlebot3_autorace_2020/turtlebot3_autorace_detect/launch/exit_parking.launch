@@ -1,0 +1,4 @@
+<launch>
+  <node pkg="turtlebot3_autorace_detect" type="exit_parking" name="exit_parking" output="screen">
+  </node>
+</launch>
