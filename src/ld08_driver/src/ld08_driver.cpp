@@ -26,7 +26,7 @@ int main(int argc , char **argv)
     CmdInterfaceLinux cmd_port(ver);
     
     // Manually specify the port name (replace with your actual port, e.g., "/dev/ttyUSB0")
-    std::string port_name = "/dev/ttyUSB1"; 
+    std::string port_name = "/dev/ttyUSB0"; 
 
     if (port_name.empty() == false)
     {
