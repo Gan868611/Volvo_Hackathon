@@ -9,12 +9,43 @@ detect:
       lightness_l: 105
       lightness_h: 255
     white:
-      hue_l: 75
-      hue_h: 107
-      saturation_l: 40
-      saturation_h: 255
-      lightness_l: 95
+      hue_l: 0
+      hue_h: 179
+      saturation_l: 0
+      saturation_h: 31
+      lightness_l: 165
       lightness_h: 255
+    blue:
+      hue_l: 63
+      hue_h: 107
+      saturation_l: 50
+      saturation_h: 255
+      lightness_l: 90
+      lightness_h: 255
+
+
+
+      # yellow:
+      #   hue_l: 19
+      #   hue_h: 43
+      #   saturation_l: 21
+      #   saturation_h: 255
+      #   lightness_l: 105
+      #   lightness_h: 255
+      # white:
+      #   hue_l: 0
+      #   hue_h: 71
+      #   saturation_l: 0
+      #   saturation_h: 61
+      #   lightness_l: 210
+      #   lightness_h: 255
+      # blue:
+      #   hue_l: 90
+      #   hue_h: 107
+      #   saturation_l: 50
+      #   saturation_h: 255
+      #   lightness_l: 90
+      #   lightness_h: 255
 
 #working
 # yellow:

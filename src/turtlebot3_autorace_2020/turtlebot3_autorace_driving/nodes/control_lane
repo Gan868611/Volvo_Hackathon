@@ -32,11 +32,13 @@ class ControlLane():
 
         self.lastError = 0
         self.MAX_VEL = 0.7
+        self.max_vel = 0.05
 
         rospy.on_shutdown(self.fnShutDown)
 
     def cbGetMaxVel(self, max_vel_msg):
-        self.MAX_VEL = max_vel_msg.data
+        # self.MAX_VEL = max_vel_msg.data
+        self.max_vel = max_vel_msg.data
 
     def cbFollowLane(self, desired_center):
         center = desired_center.data
@@ -51,7 +53,7 @@ class ControlLane():
         
         twist = Twist()
         # twist.linear.x = 0.05        
-        twist.linear.x = min(self.MAX_VEL * ((1 - abs(error) / 500) ** 2.2), 0.05)
+        twist.linear.x = min(self.MAX_VEL * ((1 - abs(error) / 500) ** 2.2), self.max_vel)
         twist.linear.y = 0
         twist.linear.z = 0
         twist.angular.x = 0

@@ -153,6 +153,7 @@ class ControlMoving():
         # rospy.loginfo("turn_left function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
+            print("self.current_theta: ", self.current_theta,' ', self.desired_theta)
             self.desired_theta = self.current_theta + math.radians(msg.moving_value_angular)
             self.is_step_start = True
         
@@ -207,6 +208,9 @@ class ControlMoving():
 
 
     def fnTurn(self):
+        #change
+        # self.desired_theta = (self.desired_theta + math.pi) % (2 * math.pi) - math.pi
+
         err_theta = self.current_theta - self.desired_theta
         
         # rospy.loginfo("err_theta  desired_theta  current_theta : %f  %f  %f", err_theta, self.desired_theta, self.current_theta)

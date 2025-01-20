@@ -44,6 +44,13 @@ class DetectLane():
         self.lightness_yellow_l = rospy.get_param("~detect/lane/yellow/lightness_l", 95)
         self.lightness_yellow_h = rospy.get_param("~detect/lane/yellow/lightness_h", 255)
 
+        self.hue_blue_l = rospy.get_param("~detect/lane/blue/hue_l", 10)
+        self.hue_blue_h = rospy.get_param("~detect/lane/blue/hue_h", 127)
+        self.saturation_blue_l = rospy.get_param("~detect/lane/blue/saturation_l", 70)
+        self.saturation_blue_h = rospy.get_param("~detect/lane/blue/saturation_h", 255)
+        self.lightness_blue_l = rospy.get_param("~detect/lane/blue/lightness_l", 95)
+        self.lightness_blue_h = rospy.get_param("~detect/lane/blue/lightness_h", 255)
+
         self.is_calibration_mode = rospy.get_param("~is_detection_calibration_mode", False)
         if self.is_calibration_mode == True:
             srv_detect_lane = Server(DetectLaneParamsConfig, self.cbGetDetectLaneParam)
@@ -58,7 +65,6 @@ class DetectLane():
             # subscribes raw image
             self.sub_image_original = rospy.Subscriber('/detect/image_input', Image, self.cbFindLane, queue_size = 1)
 
-        # self.sub_overtake = rospy.Subscriber('/overtake', UInt8, self.cbOvertake, queue_size = 1)
 
         if self.pub_image_type == "compressed":
             # publishes lane image in compressed type 
@@ -72,18 +78,29 @@ class DetectLane():
                 # publishes lane image in compressed type 
                 self.pub_image_white_lane = rospy.Publisher('/detect/image_output_sub1/compressed', CompressedImage, queue_size = 1)
                 self.pub_image_yellow_lane = rospy.Publisher('/detect/image_output_sub2/compressed', CompressedImage, queue_size = 1)
+                self.pub_image_blue_lane = rospy.Publisher('/detect/image_output_sub3/compressed', CompressedImage, queue_size = 1)
             elif self.pub_image_type == "raw":
                 # publishes lane image in raw type
                 self.pub_image_white_lane = rospy.Publisher('/detect/image_output_sub1', Image, queue_size = 1)
                 self.pub_image_yellow_lane = rospy.Publisher('/detect/image_output_sub2', Image, queue_size = 1)
+                self.pub_image_blue_lane = rospy.Publisher('/detect/image_output_sub3', CompressedImage, queue_size = 1)
+        
+        self.sub_switch_lane = rospy.Subscriber('/detect/ccw_loop', UInt8, self.cbSwitchLane, queue_size = 1) #0 for count clock wise, 1 for clockwise
+        self.lane = 'yellow'
+        # self.lane = 'white'
+
+        self.sub_overtake = rospy.Subscriber('/overtake', UInt8, self.cbOvertake, queue_size = 1)
 
         self.pub_lane = rospy.Publisher('/detect/lane', Float64, queue_size = 1)
 
         # subscribes state : yellow line reliability
         self.pub_yellow_line_reliability = rospy.Publisher('/detect/yellow_line_reliability', UInt8, queue_size=1)
+        self.pub_blue_line_reliability = rospy.Publisher('/detect/blue_line_reliability', UInt8, queue_size=1)
  
         # subscribes state : white line reliability
         self.pub_white_line_reliability = rospy.Publisher('/detect/white_line_reliability', UInt8, queue_size=1)
+
+        self.pub_max_vel = rospy.Publisher('/control/max_vel', Float64, queue_size = 1)
  
         self.cvBridge = CvBridge()
 
@@ -94,10 +111,38 @@ class DetectLane():
 
         self.reliability_white_line = 100
         self.reliability_yellow_line = 100
+        self.reliability_blue_line = 100
 
-    # def cbOvertake(self, data):
+        self.overtake = False
+        increment = 10
+        # Increment from 0 to 320
+        part1 = np.arange(0, 450, increment)
+        # Repeat 320 for 10 times
+        part2 = np.full(30, 450)
+        # Decrement from 320 to 0
+        part3 = np.arange(450, -1, -increment)
+
+        # Concatenate the parts
+        offset = np.concatenate((part1, part2, part3))
+        self.offset_it = iter(offset)
+
+
+    def cbSwitchLane(self, lane):
+        if lane.data == 0:
+            self.lane = 'yellow'
         
-    #     pass
+        elif lane.data == 1:
+            self.lane = 'white'
+
+
+
+
+
+    def cbOvertake(self, isOvertake):
+        
+        if isOvertake.data == 1:
+            print("Overtaking")
+            self.overtake = True
 
     def cbGetDetectLaneParam(self, config, level):
         rospy.loginfo("[Detect Lane] Detect Lane Calibration Parameter reconfigured to")
@@ -120,6 +165,13 @@ class DetectLane():
         self.saturation_white_h = config.saturation_white_h
         self.lightness_white_l = config.lightness_white_l
         self.lightness_white_h = config.lightness_white_h
+
+        self.hue_blue_l = config.hue_blue_l
+        self.hue_blue_h = config.hue_blue_h
+        self.saturation_blue_l = config.saturation_blue_l
+        self.saturation_blue_h = config.saturation_blue_h
+        self.lightness_blue_l = config.lightness_blue_l
+        self.lightness_blue_h = config.lightness_blue_h
 
         self.hue_yellow_l = config.hue_yellow_l
         self.hue_yellow_h = config.hue_yellow_h
@@ -149,25 +201,42 @@ class DetectLane():
 
         # find White and Yellow Lanes
         white_fraction, cv_white_lane = self.maskWhiteLane(cv_image)
-        yellow_fraction, cv_yellow_lane = self.maskYellowLane(cv_image)
+        yellow_fraction, yellow_right_fraction, cv_yellow_lane = self.maskYellowLane(cv_image)
+        blue_fraction, blue_left_fraction, cv_blue_lane = self.maskBlueLane(cv_image)
 
-        print("yellow_fraction:", yellow_fraction, "white fraction: ", white_fraction)
+        print("yellow_right_fraction:", yellow_right_fraction)
+        print("blue_left_fraction:", blue_left_fraction)
+
+        if self.lane == 'yellow':
+            left_fraction = yellow_fraction
+            left_outlier_fraction = yellow_right_fraction
+            cv_left_lane = cv_yellow_lane
+            right_fraction = blue_fraction
+            cv_right_lane = cv_blue_lane
+        elif self.lane == 'white':
+            left_fraction = white_fraction
+            cv_left_lane = cv_white_lane
+            right_fraction = blue_fraction
+            cv_right_lane = cv_blue_lane
+
+
+        print("yellow_fraction:", yellow_fraction, "white fraction: ", white_fraction,"blue_fraction:", blue_fraction)
 
         try:
-            if yellow_fraction > 8000:
-                self.left_fitx, self.left_fit = self.fit_from_lines(self.left_fit, cv_yellow_lane)
+            if left_fraction > 9000:
+                self.left_fitx, self.left_fit = self.fit_from_lines(self.left_fit, cv_left_lane)
                 self.mov_avg_left = np.append(self.mov_avg_left,np.array([self.left_fit]), axis=0)
 
-            if white_fraction > 8000:
-                self.right_fitx, self.right_fit = self.fit_from_lines(self.right_fit, cv_white_lane)
+            if right_fraction > 9000:
+                self.right_fitx, self.right_fit = self.fit_from_lines(self.right_fit, cv_right_lane)
                 self.mov_avg_right = np.append(self.mov_avg_right,np.array([self.right_fit]), axis=0)
         except:
-            if yellow_fraction > 8000:
-                self.left_fitx, self.left_fit = self.sliding_windown(cv_yellow_lane, 'left')
+            if left_fraction > 9000:
+                self.left_fitx, self.left_fit = self.sliding_windown(cv_left_lane, 'left')
                 self.mov_avg_left = np.array([self.left_fit])
 
-            if white_fraction > 8000:
-                self.right_fitx, self.right_fit = self.sliding_windown(cv_white_lane, 'right')
+            if right_fraction > 9000:
+                self.right_fitx, self.right_fit = self.sliding_windown(cv_right_lane, 'right')
                 self.mov_avg_right = np.array([self.right_fit])
 
         MOV_AVG_LENGTH = 5
@@ -184,7 +253,7 @@ class DetectLane():
 
         if self.mov_avg_right.shape[0] > 1000:
             self.mov_avg_right = self.mov_avg_right[0:MOV_AVG_LENGTH]
-        self.make_lane(cv_image, white_fraction, yellow_fraction)
+        self.make_lane(cv_image, right_fraction, left_fraction, left_outlier_fraction)
 
     def maskWhiteLane(self, image):
         # Convert BGR to HSV
@@ -212,10 +281,10 @@ class DetectLane():
         if self.is_calibration_mode == False:
             if fraction_num > 35000:
                 if self.lightness_white_l < 250:
-                    self.lightness_white_l += 20
+                    self.lightness_white_l += 0
             elif fraction_num < 5000:
                 if self.lightness_white_l > 50:
-                    self.lightness_white_l -= 20
+                    self.lightness_white_l -= 0
 
         how_much_short = 0
 
@@ -271,13 +340,17 @@ class DetectLane():
 
         fraction_num = np.count_nonzero(mask)
 
+        height, width = mask.shape
+        right_mask = mask[:, width // 2:]
+        right_fraction_num = np.count_nonzero(right_mask)
+
         if self.is_calibration_mode == False:
             if fraction_num > 35000:
                 if self.lightness_yellow_l < 250:
-                    self.lightness_yellow_l += 15
+                    self.lightness_yellow_l += 0
             elif fraction_num < 5000:
                 if self.lightness_yellow_l > 90:
-                    self.lightness_yellow_l -= 15
+                    self.lightness_yellow_l -= 0
 
         how_much_short = 0
 
@@ -307,13 +380,81 @@ class DetectLane():
                 # publishes yellow lane filtered image in raw type
                 self.pub_image_yellow_lane.publish(self.cvBridge.cv2_to_imgmsg(mask, "bgr8"))
 
-        return fraction_num, mask
+        return fraction_num, right_fraction_num, mask
+    
+    def maskBlueLane(self, image):
+        # Convert BGR to HSV
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+        Hue_l = self.hue_blue_l
+        Hue_h = self.hue_blue_h
+        Saturation_l = self.saturation_blue_l
+        Saturation_h = self.saturation_blue_h
+        Lightness_l = self.lightness_blue_l
+        Lightness_h = self.lightness_blue_h
+
+        # define range of blue color in HSV
+        lower_blue = np.array([Hue_l, Saturation_l, Lightness_l])
+        upper_blue = np.array([Hue_h, Saturation_h, Lightness_h])
+
+        # Threshold the HSV image to get only blue colors
+        mask = cv2.inRange(hsv, lower_blue, upper_blue)
+
+        # Bitwise-AND mask and original image
+        res = cv2.bitwise_and(image, image, mask = mask)
+
+        fraction_num = np.count_nonzero(mask)
+
+        height, width = mask.shape
+        left_mask = mask[:, :width // 2]
+        left_fraction_num = np.count_nonzero(left_mask)
+
+        print("lightness: ",self.lightness_blue_l)
+
+        if self.is_calibration_mode == False:
+            if fraction_num > 35000:
+                if self.lightness_blue_l < 250:
+                    self.lightness_blue_l += 0
+            elif fraction_num < 5000:
+                if self.lightness_blue_l > 90:
+                    self.lightness_blue_l -= 0
+
+
+        how_much_short = 0
+
+        for i in range(0, 600):
+            if np.count_nonzero(mask[i,::]) > 0:
+                how_much_short += 1
+        
+        how_much_short = 600 - how_much_short
+
+        if how_much_short > 100:
+            if self.reliability_blue_line >= 5:
+                self.reliability_blue_line -= 0
+        elif how_much_short <= 100:
+            if self.reliability_blue_line <= 99:
+                self.reliability_blue_line += 5
+
+        msg_blue_line_reliability = UInt8()
+        msg_blue_line_reliability.data = self.reliability_blue_line
+        self.pub_blue_line_reliability.publish(msg_blue_line_reliability)
+
+        if self.is_calibration_mode == True:
+            if self.pub_image_type == "compressed":
+                # publishes blue lane filtered image in compressed type
+                self.pub_image_blue_lane.publish(self.cvBridge.cv2_to_compressed_imgmsg(mask, "jpg"))
+
+            elif self.pub_image_type == "raw":
+                # publishes blue lane filtered image in raw type
+                self.pub_image_blue_lane.publish(self.cvBridge.cv2_to_imgmsg(mask, "bgr8"))
+
+        return fraction_num, left_fraction_num, mask
 
     def fit_from_lines(self, lane_fit, image):
         nonzero = image.nonzero()
         nonzeroy = np.array(nonzero[0])
         nonzerox = np.array(nonzero[1])
-        margin = 100
+        margin = 60
         lane_inds = ((nonzerox > (lane_fit[0] * (nonzeroy ** 2) + lane_fit[1] * nonzeroy + lane_fit[2] - margin)) & (
         nonzerox < (lane_fit[0] * (nonzeroy ** 2) + lane_fit[1] * nonzeroy + lane_fit[2] + margin)))
 
@@ -412,7 +553,7 @@ class DetectLane():
 
         return lane_fitx, lane_fit
 
-    def make_lane(self, cv_image, white_fraction, yellow_fraction):
+    def make_lane(self, cv_image, right_fraction, left_fraction, left_outlier_fraction):
         # Create an image to draw the lines on
         warp_zero = np.zeros((cv_image.shape[0], cv_image.shape[1], 1), dtype=np.uint8)
 
@@ -421,11 +562,11 @@ class DetectLane():
 
         ploty = np.linspace(0, cv_image.shape[0] - 1, cv_image.shape[0])
 
-        if yellow_fraction > 8000:
+        if left_fraction > 9000:
             pts_left = np.array([np.flipud(np.transpose(np.vstack([self.left_fitx, ploty])))])
             cv2.polylines(color_warp_lines, np.int_([pts_left]), isClosed=False, color=(0, 0, 255), thickness=25)
 
-        if white_fraction > 8000:
+        if right_fraction > 9000:
             pts_right = np.array([np.transpose(np.vstack([self.right_fitx, ploty]))])
             cv2.polylines(color_warp_lines, np.int_([pts_right]), isClosed=False, color=(255, 255, 0), thickness=25)
         
@@ -433,9 +574,25 @@ class DetectLane():
 
         print("white rely:", self.reliability_white_line, "yellow rely: ", self.reliability_yellow_line )
 
+        #TODO
+        offset = 0
+        if self.overtake:
+            try:
+                offset =  next(self.offset_it)
+                print("offset: ", offset)
+            except StopIteration:
+                self.overtake = False
+                print("Done overtake: ")
+
         if self.reliability_white_line > 50 and self.reliability_yellow_line > 50:   
-            if white_fraction > 8000 and yellow_fraction > 8000:
-                centerx = np.mean([self.left_fitx, self.right_fitx], axis=0)
+            if right_fraction > 9000 and left_fraction > 9000:
+                #TODO
+                bias_left = 0.5
+                bias_right = 1 - bias_left
+                centerx = self.left_fitx * bias_left + self.right_fitx * bias_right
+
+                # centerx = np.mean([self.left_fitx, self.right_fitx], axis=0)
+                centerx = np.add(centerx, offset)
                 # centerx = np.subtract(centerx, 60)
                 # final_centerx = centerx.item(599)
                 pts = np.hstack((pts_left, pts_right))
@@ -446,15 +603,17 @@ class DetectLane():
                 # Draw the lane onto the warped blank image
                 cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
 
-            if white_fraction > 8000 and yellow_fraction <= 8000:
+            if right_fraction > 9000 and left_fraction <= 9000:
                 centerx = np.subtract(self.right_fitx, 150)
+                centerx = np.add(centerx, offset)
                 # final_centerx = centerx.item(599)
                 pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
                 cv2.polylines(color_warp_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
 
-            if white_fraction <= 8000 and yellow_fraction > 8000:
-                centerx = np.add(self.left_fitx, 290)
+            if right_fraction <= 9000 and left_fraction > 9000:
+                centerx = np.add(self.left_fitx, 265)
+                centerx = np.add(centerx, offset)
                 # final_centerx = centerx.item(50)
                 pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
@@ -462,6 +621,7 @@ class DetectLane():
 
         elif self.reliability_white_line <= 50 and self.reliability_yellow_line > 50:
             centerx = np.add(self.left_fitx, 320)
+            centerx = np.add(centerx, offset)
             # final_centerx = centerx.item(50)
             pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
@@ -469,6 +629,7 @@ class DetectLane():
 
         elif self.reliability_white_line > 50 and self.reliability_yellow_line <= 50:
             centerx = np.subtract(self.right_fitx, 200)
+            centerx = np.add(centerx, offset)
             # final_centerx = centerx.item(599)
             pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
 
@@ -484,11 +645,28 @@ class DetectLane():
 
         if self.pub_image_type == "compressed":
             if self.is_center_x_exist == True:
+                
+
                 # publishes lane center
                 msg_desired_center = Float64()
                 # msg_desired_center.data = final_centerx
-                msg_desired_center.data = centerx.item(350)
+                msg_desired_center.data = centerx.item(400)
+
+
                 self.pub_lane.publish(msg_desired_center)
+                #TODO
+                if left_outlier_fraction < 13000:
+                    self.pub_max_vel.publish(0.05)
+                elif left_outlier_fraction >= 13000:
+                    self.pub_max_vel.publish(0.01)
+                
+                elif self.lane == 'white' and right_fraction > 36000:
+                    self.pub_max_vel.publish(0.02)
+
+
+
+                
+                    
 
             self.pub_image_lane.publish(self.cvBridge.cv2_to_compressed_imgmsg(final, "jpg"))
 
@@ -496,7 +674,7 @@ class DetectLane():
             if self.is_center_x_exist == True:
                 # publishes lane center
                 msg_desired_center = Float64()
-                msg_desired_center.data = centerx.item(160)
+                msg_desired_center.data = centerx.item(350)
                 self.pub_lane.publish(msg_desired_center)
 
             self.pub_image_lane.publish(self.cvBridge.cv2_to_imgmsg(final, "bgr8"))

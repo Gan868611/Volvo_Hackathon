@@ -14,8 +14,8 @@
   <node pkg="map_server" name="map_server" type="map_server" args="$(arg map_file)"/>
 
   <!-- AMCL -->
-  <!-- <include file="$(find turtlebot3_navigation)/launch/amcl_new.launch"/> -->
-  <include file="$(find turtlebot3_navigation)/launch/amcl_ori.launch"/>
+  <include file="$(find turtlebot3_navigation)/launch/amcl_new.launch"/>
+  <!-- <include file="$(find turtlebot3_navigation)/launch/amcl_ori.launch"/> -->
 
   <!-- move_base -->
   <include file="$(find turtlebot3_navigation)/launch/move_base.launch">

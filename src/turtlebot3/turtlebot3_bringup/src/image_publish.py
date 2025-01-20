@@ -13,15 +13,15 @@ def compressed_image_publisher():
     image_pub = rospy.Publisher('/camera/image_rect_color/compressed', CompressedImage, queue_size=10)
     
     # Set the publishing rate to 1 Hz
-    rate = rospy.Rate(1)  # 1 Hz
+    rate = rospy.Rate(0.5)  # 1 Hz
     
     # Load the image file
-    image_dir = "/home/volvo2/catkin_ws/src/lane_following/images/"  # Image directory
+    image_dir = "/home/volvo9/catkin_ws/src/lane_following/images/"  # Image directory
     image_prefix = "output_"
     image_extension = ".jpg"
-    image_count = 84  # Number of images to loop through (000 to 124)
+    image_count = 89  # Number of images to loop through (000 to 124)
 
-    image_index = 11  # Start at the first image
+    image_index = 12  # Start at the first image
 
     while not rospy.is_shutdown():
         try:
@@ -49,6 +49,7 @@ def compressed_image_publisher():
             
             rospy.loginfo("Published compressed image to /camera/image/compressed")
             image_index = (image_index + 1) % image_count  
+            print(image_index)
             
             # Sleep to maintain the publishing rate
             rate.sleep()
