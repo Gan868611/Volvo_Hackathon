@@ -1,0 +1,307 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+################################################################################
+# Example: ControlMoving node for purely relative turning/forward motion
+# Key changes:
+#   - Removed custom +/- 2π unwrapping in cbOdom
+#   - Do not reset current_theta or pos_x,pos_y in step_completed()
+#   - Each new motion command just uses the *current* heading/position as the start
+################################################################################
+
+import rospy
+import math
+import tf
+from enum import Enum
+from std_msgs.msg import UInt8, Float64
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from turtlebot3_autorace_msgs.msg import MovingParam
+
+class ControlMoving():
+    def __init__(self):
+        # Subscribers
+        self.sub_moving_state = rospy.Subscriber('/control/moving/state', MovingParam,
+                                                 self.get_param, queue_size=1)
+        self.sub_odom = rospy.Subscriber('/odom', Odometry, self.cbOdom, queue_size=1)
+
+        # Publishers
+        self.pub_cmd_vel = rospy.Publisher('/control_moving_cmd_vel', Twist, queue_size=1)
+        self.pub_max_vel = rospy.Publisher('/control/max_vel', Float64, queue_size=1)
+        self.pub_turn_error = rospy.Publisher('/turn_error', Float64, queue_size=1)
+        self.pub_moving_complete = rospy.Publisher('/control/moving/complete', UInt8, queue_size=1)
+
+        # Moving type enum
+        self.TypeOfMoving = Enum('TypeOfMoving', 'idle left right forward backward')
+        self.TypeOfState  = Enum('TypeOfState',  'idle start stop finish')
+
+        # Internal odom state
+        self.current_pos_x  = 0.0
+        self.current_pos_y  = 0.0
+        self.current_theta  = 0.0  # stays in [-π, +π]
+        self.lastError      = 0.0
+
+        # Will store the start pose when we begin a forward/backward
+        self.start_pos_x    = 0.0
+        self.start_pos_y    = 0.0
+
+        # Desired angle (for turns)
+        self.desired_theta  = 0.0
+
+        # Movement flags
+        self.is_step_start    = False
+        self.is_step_left     = False
+        self.is_step_right    = False
+        self.is_step_forward  = False
+        self.is_step_backward = False
+
+        # For storing the incoming movement command
+        self.moving_type      = UInt8()
+        self.moving_angluar   = 0.0
+        self.moving_linear    = 0.0
+        self.moving_msg       = MovingParam()
+
+        # Publish an initial max vel (optional)
+        msg_pub_max_vel = Float64()
+        msg_pub_max_vel.data = 0.05
+        self.pub_max_vel.publish(msg_pub_max_vel)
+
+        # Main loop
+        loop_rate = rospy.Rate(50)  # 50 Hz
+        while not rospy.is_shutdown():
+            if self.is_step_left:
+                self.turn_left(self.moving_msg)
+            elif self.is_step_right:
+                self.turn_right(self.moving_msg)
+            elif self.is_step_forward:
+                self.go_forward(self.moving_msg)
+            elif self.is_step_backward:
+                self.go_backward(self.moving_msg)
+            loop_rate.sleep()
+
+        rospy.on_shutdown(self.fnShutDown)
+
+    def cbOdom(self, odom_msg):
+        """
+        Odometry callback. We simply read the yaw angle in [-π, +π], x, and y.
+        No custom +/- 2π unwrapping.
+        """
+        quaternion = (
+            odom_msg.pose.pose.orientation.x,
+            odom_msg.pose.pose.orientation.y,
+            odom_msg.pose.pose.orientation.z,
+            odom_msg.pose.pose.orientation.w
+        )
+        # euler_from_quaternion returns (roll, pitch, yaw) in [-π, +π]
+        _, _, yaw = tf.transformations.euler_from_quaternion(quaternion)
+        self.current_theta = yaw
+
+        self.current_pos_x = odom_msg.pose.pose.position.x
+        self.current_pos_y = odom_msg.pose.pose.position.y
+
+    def get_param(self, msg):
+        """
+        Called when we receive a new 'MovingParam' on /control/moving/state.
+        This is our command to do a turn or straight motion.
+        """
+        self.moving_type      = msg.moving_type
+        self.moving_angluar   = msg.moving_value_angular
+        self.moving_linear    = msg.moving_value_linear
+        self.moving_msg       = msg
+
+        rospy.loginfo("Got new command: type=%d, angular=%.3f, linear=%.3f",
+                      self.moving_type, self.moving_angluar, self.moving_linear)
+
+        # If any motion is in progress, we do not overwrite it.
+        # If no motion in progress, start a new one:
+        if not any([self.is_step_left, self.is_step_right,
+                    self.is_step_forward, self.is_step_backward]):
+
+            if msg.moving_type == self.TypeOfMoving.left.value:
+                self.is_step_left = True
+            elif msg.moving_type == self.TypeOfMoving.right.value:
+                self.is_step_right = True
+            elif msg.moving_type == self.TypeOfMoving.forward.value:
+                self.is_step_forward = True
+            elif msg.moving_type == self.TypeOfMoving.backward.value:
+                self.is_step_backward = True
+
+    def turn_left(self, msg):
+        """
+        Turn the robot left by `msg.moving_value_angular` degrees
+        *relative* to its current heading.
+        """
+        if not self.is_step_start:
+            # On first call, define the desired final heading
+            self.lastError = 0.0
+            # Convert degrees to radians
+            desired_delta = math.radians(msg.moving_value_angular)
+            self.desired_theta = self.current_theta + desired_delta
+            self.is_step_start = True
+
+
+        error = self.fnTurn()
+
+        msg = Float64()
+        msg.data = error
+
+        self.pub_turn_error.publish(msg)
+        # If error is small, we are done
+        if abs(error) < 0.07:  # about 3 degrees
+            self.step_completed()
+
+    def turn_right(self, msg):
+        """
+        Turn the robot right by `msg.moving_value_angular` degrees
+        *relative* to its current heading.
+        """
+        if not self.is_step_start:
+            self.lastError = 0.0
+            desired_delta  = math.radians(msg.moving_value_angular)
+            self.desired_theta = self.current_theta - desired_delta
+            self.is_step_start = True
+
+        error = self.fnTurn()
+        if abs(error) < 0.05:
+            self.step_completed()
+
+    def go_forward(self, msg):
+        """
+        Move forward by `msg.moving_value_linear` meters from current position.
+        """
+        if not self.is_step_start:
+            self.lastError    = 0.0
+            self.start_pos_x  = self.current_pos_x
+            self.start_pos_y  = self.current_pos_y
+            self.is_step_start = True
+
+        error = self.fnStraight(msg.moving_value_linear)
+        if abs(error) < 0.005:
+            self.step_completed()
+
+    def go_backward(self, msg):
+        """
+        Move backward by `msg.moving_value_linear` meters from current position.
+        """
+        if not self.is_step_start:
+            self.lastError    = 0.0
+            self.start_pos_x  = self.current_pos_x
+            self.start_pos_y  = self.current_pos_y
+            self.is_step_start = True
+
+        error = self.fnBackStraight(msg.moving_value_linear)
+        if abs(error) < 0.005:
+            self.step_completed()
+
+    def fnTurn(self):
+        """
+        PD control for turning to 'self.desired_theta'.
+        error = current_theta - desired_theta
+        We publish a Twist that rotates until error ~ 0.
+        """
+        err_theta = self.current_theta - self.desired_theta
+        Kp = 0.45
+        Kd = 0.03
+
+        angular_z = Kp * err_theta + Kd * (err_theta - self.lastError)
+        self.lastError = err_theta
+
+        twist = Twist()
+        twist.linear.x = 0.0
+        twist.angular.z = -(angular_z * 2)  # negative sign for direction
+        self.pub_cmd_vel.publish(twist)
+
+        return err_theta
+
+    def fnStraight(self, desired_dist):
+        """
+        Move forward desired_dist from the stored (start_pos_x, start_pos_y).
+        error = distance_traveled - desired_dist
+        distance_traveled = sqrt( (curX - startX)^2 + (curY - startY)^2 )
+        """
+        dist_traveled = math.sqrt((self.current_pos_x - self.start_pos_x)**2 +
+                                  (self.current_pos_y - self.start_pos_y)**2)
+        err_pos = dist_traveled - desired_dist
+
+        Kp = 0.04
+        Kd = 0.05
+        control = Kp * err_pos + Kd * (err_pos - self.lastError)
+        self.lastError = err_pos
+
+        twist = Twist()
+        if err_pos < 0:
+            # We haven't reached the desired distance yet, keep going forward
+            twist.linear.x = 0.1
+        else:
+            # We overshot, so go backward slightly (or you could just stop)
+            twist.linear.x = -0.1
+
+        self.pub_cmd_vel.publish(twist)
+        return err_pos
+
+    def fnBackStraight(self, desired_dist):
+        """
+        Move backward desired_dist from the stored (start_pos_x, start_pos_y).
+        """
+        dist_traveled = math.sqrt((self.current_pos_x - self.start_pos_x)**2 +
+                                  (self.current_pos_y - self.start_pos_y)**2)
+        err_pos = dist_traveled - desired_dist
+
+        Kp = 0.04
+        Kd = 0.05
+        control = Kp * err_pos + Kd * (err_pos - self.lastError)
+        self.lastError = err_pos
+
+        twist = Twist()
+        if err_pos < 0:
+            # Haven't reached distance, go backward
+            twist.linear.x = -0.1
+        else:
+            # Overshot, go forward slightly
+            twist.linear.x = 0.1
+
+        self.pub_cmd_vel.publish(twist)
+        return err_pos
+
+    def step_completed(self):
+        """
+        Called once the motion error is < threshold. Stop the robot,
+        reset flags for next command. *No forced reset of current_theta*.
+        """
+        self.is_step_start    = False
+        self.is_step_left     = False
+        self.is_step_right    = False
+        self.is_step_forward  = False
+        self.is_step_backward = False
+
+        self.lastError      = 0.0
+
+        # Stop movement
+        self.fnStop()
+
+        # Publish "finish" state
+        state = UInt8()
+        state.data = self.TypeOfState.finish.value
+        self.pub_moving_complete.publish(state)
+
+    def fnStop(self):
+        """
+        Publish zero velocities.
+        """
+        twist = Twist()
+        self.pub_cmd_vel.publish(twist)
+
+    def fnShutDown(self):
+        """
+        Called on node shutdown. Stop the robot.
+        """
+        rospy.loginfo("Shutting down. cmd_vel will be set to 0.")
+        self.fnStop()
+
+    def main(self):
+        rospy.spin()
+
+if __name__ == '__main__':
+    rospy.init_node('control_moving_relative')
+    node = ControlMoving()
+    node.main()

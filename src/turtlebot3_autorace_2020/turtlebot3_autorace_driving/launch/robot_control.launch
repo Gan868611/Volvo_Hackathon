@@ -1,13 +1,7 @@
 <launch>
-    <!-- Launch the Twist Mux -->
-    <node pkg="twist_mux" type="twist_mux" name="twist_mux" output="screen">
-        <rosparam command="load" file="$(find turtlebot3_autorace_driving)/config/mux.yaml" />
-        <remap from="/cmd_vel_out" to="/cmd_vel" />
-    </node>
-
     <!-- Launch the SMACH State Machine Node -->
     <node pkg="turtlebot3_autorace_driving" type="smach_main.py" name="smach_state_machine" output="screen">
-    	<param name="start_position" value="4" />
+    	<param name="start_position" value="3" />
         <param name="use_sim_time" value="false"/>  <!-- Set true if running in simulation -->
     </node>
 
@@ -15,5 +9,10 @@
     <node pkg="turtlebot3_autorace_driving" type="safety_node.py" name="safety_node" output="screen">
         <param name="use_sim_time" value="false"/>  <!-- Set true if running in simulation -->
     </node>
-</launch>
 
+     <!-- Launch the Twist Mux -->
+    <node pkg="twist_mux" type="twist_mux" name="twist_mux" output="screen">
+        <rosparam command="load" file="$(find turtlebot3_autorace_driving)/config/mux.yaml" />
+        <remap from="/cmd_vel_out" to="/cmd_vel" />
+    </node>
+</launch>

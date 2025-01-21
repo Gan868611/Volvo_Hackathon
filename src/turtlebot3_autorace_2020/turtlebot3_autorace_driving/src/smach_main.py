@@ -6,7 +6,7 @@ import smach_ros
 import os
 import yaml
 import requests
-from std_msgs.msg import String
+from std_msgs.msg import String, UInt32
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -32,6 +32,7 @@ def is_near_location(current_pose, target_location):
 class StartState(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=['proceed_to_localization'])
+        self.cmd_vel_pub = rospy.Publisher('/smach_cmd_vel', Twist, queue_size=10)
         self.required_topics = [
             # '/cmd_vel',
             # '/odom',
@@ -68,6 +69,11 @@ class StartState(smach.State):
         return True
 
     def execute(self, userdata):
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(20): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
         rospy.loginfo("Executing StartState...")
 
         # Perform system checks
@@ -168,19 +174,19 @@ class NavigateToBeforeGantry(smach.State):
         # Define movement configurations for parking positions 
         self.movement_config = {
             1: [
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.5},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.47},
                 {'type': TypeOfMoving.right.value, 'angular': 90, 'linear': 0},
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.25},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.11},
             ],
             2: [
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.5},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.47},
                 {'type': TypeOfMoving.right.value, 'angular': 90, 'linear': 0},
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.5},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.34},
             ],
             3: [
                 {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.22},
                 {'type': TypeOfMoving.left.value, 'angular': 90, 'linear': 0},
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.40},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.34},
             ],
             4: [
                 {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.22},
@@ -219,6 +225,7 @@ class NavigateToBeforeGantry(smach.State):
 
         # Execute movements sequentially
         for idx, move in enumerate(movements):
+            self.is_moving_complete = False
             rospy.loginfo(f"Step {idx + 1}: Executing movement {move}")
             msg_moving = MovingParam()
             msg_moving.moving_type = move['type']
@@ -230,6 +237,7 @@ class NavigateToBeforeGantry(smach.State):
                 rospy.logerr(f"Failed at step {idx + 1} for parking position {position_param}")
                 return 'navigation_failed'
 
+            self.is_moving_complete = False
             rospy.sleep(0.5)  # Optional pause between movements
 
         rospy.loginfo("Successfully navigated to before gantry.")
@@ -326,7 +334,7 @@ class GantryInteractionExit(smach.State):
         # Stop the robot 20x0.1seconds
         twist = Twist()
         twist.linear.x = 0.0
-        for _ in range(10): 
+        for _ in range(5): 
             self.cmd_vel_pub.publish(twist)
             rospy.sleep(0.1)
         rospy.sleep(0.2)
@@ -340,7 +348,6 @@ class GantryInteractionExit(smach.State):
         self.pub_moving.publish(msg_moving)
         if not self.wait_for_completion():
             rospy.logerr("Failed to move forward through the gantry.")
-            return 'proceed_to_lane'
 
         rospy.sleep(0.5)  # Optional pause after movement
 
@@ -366,6 +373,7 @@ class DirectionDetection(smach.State):
         self.pub_moving = rospy.Publisher('/control/moving/state', MovingParam, queue_size=10)
         self.sub_moving_complete = rospy.Subscriber('/control/moving/complete', UInt8, self.moving_complete_callback, queue_size=1)
         self.cmd_vel_pub = rospy.Publisher('/smach_cmd_vel', Twist, queue_size=10)
+        self.starting_direction = rospy.Publisher('/starting_direction', String, queue_size=3)
         self.is_moving_complete = False
 
     def moving_complete_callback(self, data):
@@ -406,6 +414,7 @@ class DirectionDetection(smach.State):
             self.cmd_vel_pub.publish(twist)
 
         rospy.loginfo(f"Direction detected: {self.sign_detected}")
+        self.starting_direction.publish(self.sign_detected)
 
         if self.sign_detected == "left":
             userdata.turn_direction_out = "left"
@@ -472,7 +481,7 @@ class DirectionDetection(smach.State):
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.forward.value
             msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.25
+            msg_moving.moving_value_linear = 0.15
             self.pub_moving.publish(msg_moving)
             if not self.wait_for_completion():
                 return 'turn_completed'
@@ -491,12 +500,16 @@ class LaneFollowing(smach.State):
         self.pedestrian_detected = False
         self.stop_sign_detected = False
         self.parking_detected = False
+        self.parking_detected_time = None  # To track when parking_detected is set to True
         self.stop_sign_last_handled_time = rospy.Time(0)  # Initialize to time 0
-        self.stop_sign_cooldown = rospy.Duration(10)  # Cool-down period (10 seconds)
+        self.stop_sign_cooldown = rospy.Duration(50)  # Cool-down period (10 seconds)
         self.current_pose = None
         self.triangle = False
         self.triangle_exit = False
+        self.yellow_left_fraction = 0
         self.lane_det_started = rospy.Publisher('/lane_det_started', Bool, queue_size=5)
+        self.parking_detection_times = [] 
+        self.parking_right = False
 
         # Throttle pose updates
         self.last_pose_update_time = rospy.Time.now()
@@ -508,6 +521,8 @@ class LaneFollowing(smach.State):
         rospy.Subscriber('/cv_node/stop_sign_detected', String, self.sign_callback, queue_size=1)
         rospy.Subscriber('/cv_node/parking_detected', String, self.parking_callback, queue_size=1)
         rospy.Subscriber('/amcl_pose', PoseWithCovarianceStamped, self.pose_callback)
+        rospy.Subscriber('/detect/yellow_left_fraction', UInt32, self.yellow_callback)
+        rospy.Subscriber('/parking_right_start', String, self.parking_right_callback)
 
         # Define locations for both directions
         self.locations_left = {
@@ -536,7 +551,25 @@ class LaneFollowing(smach.State):
 
     def parking_callback(self, msg):
         if msg.data == "parking_detected":
-            self.parking_detected = True
+            current_time = rospy.Time.now()
+            self.parking_detection_times.append(current_time)
+
+            # Remove timestamps older than 3 seconds
+            self.parking_detection_times = [
+                t for t in self.parking_detection_times if (current_time - t).to_sec() <= 3
+            ]
+
+            # Check if there are at least 4 detections within 3 seconds
+            if len(self.parking_detection_times) >= 4:
+                if not self.parking_detected:  # Only set True if it's not already True
+                    self.parking_detected = True
+                    self.parking_detected_time = rospy.Time.now()  # Track when it was set
+                    rospy.loginfo("Parking detected condition met. Setting parking_detected to True.")
+
+    def parking_right_callback(self, msg):
+        rospy.loginfo("parking right")
+        if msg.data == "start":
+            self.parking_right = True
 
     def pose_callback(self, msg):
         # Throttle pose updates
@@ -544,6 +577,9 @@ class LaneFollowing(smach.State):
         if (current_time - self.last_pose_update_time) > self.pose_update_interval:
             self.current_pose = msg.pose.pose
             self.last_pose_update_time = current_time
+
+    def yellow_callback(self, msg):
+        self.yellow_left_fraction = msg.data
 
     def check_proximity(self, location):
         """Check if the robot is near a specific location."""
@@ -570,6 +606,14 @@ class LaneFollowing(smach.State):
             return 'completed_track'
 
         while not rospy.is_shutdown():
+            # Reset parking_detected if 20 seconds have passed since it was set to True
+            if self.parking_detected and self.parking_detected_time is not None:
+                elapsed_time = rospy.Time.now() - self.parking_detected_time
+                if elapsed_time > rospy.Duration(20):  # 20 seconds
+                    rospy.loginfo("Resetting parking_detected after 20 seconds.")
+                    self.parking_detected = False
+                    self.parking_detected_time = None  # Reset the time
+
             # Check for detections
             if self.car_detected:
                 rospy.loginfo("Car detected! Transitioning to ObstacleDetection.")
@@ -586,29 +630,39 @@ class LaneFollowing(smach.State):
             # Stop Sign Handling
             current_time = rospy.Time.now()
             if self.stop_sign_detected:
+                self.stop_sign_detected = False
                 if (current_time - self.stop_sign_last_handled_time) > self.stop_sign_cooldown:
                     rospy.loginfo("Stop sign detected! Transitioning to StopSignHandling.")
                     self.lane_det_started.publish(False)
                     self.stop_sign_last_handled_time = current_time  # Update the handled time
-                    self.stop_sign_detected = False
                     return 'stop_sign_detected'
                 else:
                     rospy.loginfo("Ignoring stop sign due to cool-down period.")
 
             # Check proximity to predefined locations
-            if self.check_proximity(locations['roundabout']) and self.triangle_exit == False:
-                rospy.loginfo("Approaching triangle exit.")
-                self.triangle_exit=True
-                return 'roundabout_detected'
+            # if self.check_proximity(locations['roundabout']) and self.triangle_exit == False:
+            #     rospy.loginfo("Approaching triangle exit.")
+            #     self.triangle_exit=True
+            #     return 'roundabout_detected'
 
-            if self.check_proximity(locations['triangle']) and self.triangle == False:
-                rospy.loginfo("Approaching triangle.")
-                self.triangle=True
-                return 'triangle_detected'
+            # if self.check_proximity(locations['triangle']) and self.triangle == False:
+            #     rospy.loginfo("Approaching triangle.")
+            #     self.triangle=True
+            #     return 'triangle_detected'
 
-            if self.check_proximity(locations['car_park']) and self.parking_detected == True:
-                rospy.loginfo("Track completed. Transitioning to ReturnToCarPark.")
+
+            # need handle to reset parking detected for another direction
+            if turn_direction == "left" and self.parking_detected == True and self.yellow_left_fraction < 10000:
+                rospy.loginfo("Approaching parking (LEFT).")
                 return 'completed_track'
+
+            if turn_direction == "right" and self.parking_right == True:
+                rospy.loginfo("Approaching parking (RIGHT).")
+                return 'completed_track'
+
+            # if self.check_proximity(locations['car_park']) and self.parking_detected == True:
+            #     rospy.loginfo("Track completed. Transitioning to ReturnToCarPark.")
+            #     return 'completed_track'
 
             rate.sleep()
 
@@ -617,10 +671,12 @@ class LaneFollowing(smach.State):
 
 class StopSignHandling(smach.State):
     def __init__(self):
-        smach.State.__init__(self, outcomes=['continue_lane_following'])
+        smach.State.__init__(self, outcomes=['continue_lane_following'],
+                             input_keys=['turn_direction'])
         self.cmd_vel_pub = rospy.Publisher('/smach_cmd_vel', Twist, queue_size=10)
         self.pub_moving = rospy.Publisher('/control/moving/state', MovingParam, queue_size=10)
         self.sub_moving_complete = rospy.Subscriber('/control/moving/complete', UInt8, self.moving_complete_callback, queue_size=1)
+        self.lane_det_started = rospy.Publisher('/lane_det_started', Bool, queue_size=5)
         self.is_moving_complete = False
 
     def moving_complete_callback(self, data):
@@ -640,6 +696,10 @@ class StopSignHandling(smach.State):
 
     def execute(self, userdata):
         rospy.loginfo("Executing state: StopSignHandling")
+
+        # Get the turn direction from userdata
+        turn_direction = userdata.turn_direction
+        rospy.loginfo(f"Received turn direction: {turn_direction}")
         
         # Stop the robot
         twist = Twist()
@@ -648,42 +708,76 @@ class StopSignHandling(smach.State):
         rospy.loginfo("Robot stopped at stop sign.")
 
         # Wait for 3 seconds (or as needed)
-        # Stop the robot 30x0.1seconds
+        # Stop the robot 30x0.1secondsovertak
         twist = Twist()
         twist.linear.x = 0.0
         for _ in range(40): 
             self.cmd_vel_pub.publish(twist)
             rospy.sleep(0.1)
+        # if turn_direction == "left":
+        #     # Movement for left direction
+        #     self.is_moving_complete = False
+        #     rospy.loginfo("Robot moving forward after stop sign (LEFT).")
+        #     self.lane_det_started.publish(True)
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.forward.value
+        #     msg_moving.moving_value_angular = 0
+        #     msg_moving.moving_value_linear = 0.47
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'continue_lane_following'
 
-        self.is_moving_complete = False
-        rospy.loginfo("Robot moving forward after stop sign.")
-        msg_moving = MovingParam()
-        msg_moving.moving_type = TypeOfMoving.forward.value
-        msg_moving.moving_value_angular = 0
-        msg_moving.moving_value_linear = 0.40
-        self.pub_moving.publish(msg_moving)
-        if not self.wait_for_completion():
-            return 'continue_lane_following'
+        #     self.is_moving_complete = False
+        #     rospy.loginfo("Robot turning left.")
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.left.value
+        #     msg_moving.moving_value_angular = 45
+        #     msg_moving.moving_value_linear = 0
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'continue_lane_following'
 
-        self.is_moving_complete = False
-        rospy.loginfo("Robot turning left.")
-        msg_moving = MovingParam()
-        msg_moving.moving_type = TypeOfMoving.left.value
-        msg_moving.moving_value_angular = 45
-        msg_moving.moving_value_linear = 0
-        self.pub_moving.publish(msg_moving)
-        if not self.wait_for_completion():
-            return 'continue_lane_following'
+        #     self.is_moving_complete = False
+        #     rospy.loginfo("Robot moving forward.")
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.forward.value
+        #     msg_moving.moving_value_angular = 0
+        #     msg_moving.moving_value_linear = 0.10
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'continue_lane_following'
 
-        self.is_moving_complete = False
-        rospy.loginfo("Robot moving forward.")
-        msg_moving = MovingParam()
-        msg_moving.moving_type = TypeOfMoving.forward.value
-        msg_moving.moving_value_angular = 0
-        msg_moving.moving_value_linear = 0.10
-        self.pub_moving.publish(msg_moving)
-        if not self.wait_for_completion():
-            return 'continue_lane_following'
+        # elif turn_direction == "right":
+        #     # Movement for left direction
+        #     self.is_moving_complete = False
+        #     rospy.loginfo("Robot moving forward after stop sign (RIGHT).")
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.forward.value
+        #     msg_moving.moving_value_angular = 0
+        #     msg_moving.moving_value_linear = 0.40
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'continue_lane_following'
+
+        #     self.is_moving_complete = False
+        #     rospy.loginfo("Robot turning left.")
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.left.value
+        #     msg_moving.moving_value_angular = 45
+        #     msg_moving.moving_value_linear = 0
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'continue_lane_following'
+
+        #     self.is_moving_complete = False
+        #     rospy.loginfo("Robot moving forward.")
+        #     msg_moving = MovingParam()
+        #     msg_moving.moving_type = TypeOfMoving.forward.value
+        #     msg_moving.moving_value_angular = 0
+        #     msg_moving.moving_value_linear = 0.10
+        #     self.pub_moving.publish(msg_moving)
+        #     if not self.wait_for_completion():
+        #         return 'continue_lane_following'
 
         # Resume lane following
         rospy.loginfo("Resuming lane following.")
@@ -760,7 +854,8 @@ class ObstacleDetection(smach.State):
             if not self.obstacle_detected:
                 rospy.loginfo("Car is gone. Resuming lane following.")
                 return 'continue_lane_following'
-
+            
+            # TURN THIS ONNN
             if rospy.Time.now() > timeout:
                 rospy.loginfo("Car is still present. Proceeding to overtaking.")
                 return 'overtake'
@@ -773,12 +868,33 @@ class Overtaking(smach.State):
     def __init__(self):
         smach.State.__init__(self, outcomes=['continue_lane_following'])
         self.overtake_start_pub = rospy.Publisher('/overtake/start', String, queue_size=10)
-        self.overtake_done_sub = rospy.Subscriber('/overtake/done', String, self.overtake_done_callback)
+        # self.overtake_done_sub = rospy.Subscriber('/overtake/done', String, self.overtake_done_callback)
         self.overtake_done = False
+        self.pub_moving = rospy.Publisher('/control/moving/state', MovingParam, queue_size=10)
+        self.sub_moving_complete = rospy.Subscriber('/control/moving/complete', UInt8, self.moving_complete_callback, queue_size=1)
+        self.cmd_vel_pub = rospy.Publisher('/smach_cmd_vel', Twist, queue_size=10)
+        self.is_moving_complete = False
 
     def overtake_done_callback(self, msg):
         if msg.data == "done":
             self.overtake_done = True
+
+    def moving_complete_callback(self, data):
+        """Callback to update moving completion status."""
+        self.is_moving_complete = True
+
+    def wait_for_completion(self):
+        """Wait until the robot completes the current movement."""
+        rate = rospy.Rate(10)  # 10 Hz
+        timeout = rospy.Time.now() + rospy.Duration(15)  # 15-second timeout
+        while not rospy.is_shutdown():
+            if self.is_moving_complete:
+                self.is_moving_complete = False
+                return True
+            if rospy.Time.now() > timeout:
+                rospy.logwarn("Movement timed out!")
+                return False
+            rate.sleep()
 
     def execute(self, userdata):
         rospy.loginfo("Executing state: Overtaking")
@@ -786,23 +902,121 @@ class Overtaking(smach.State):
         # Publish message to indicate overtaking should start
         rospy.loginfo("Publishing overtaking start command.")
         self.overtake_start_pub.publish("start")
+        self.is_moving_complete = False
+
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(15): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
 
         # Wait until overtaking is complete
-        rospy.loginfo("Waiting for overtaking to complete...")
-        rate = rospy.Rate(10)  # 10 Hz
-        timeout = rospy.Time.now() + rospy.Duration(15)  # 15-second timeout
-        self.overtake_done = False  # Reset the flag
+        # rospy.loginfo("Waiting for overtaking to complete...")
+        # rate = rospy.Rate(10)  # 10 Hz
+        # timeout = rospy.Time.now() + rospy.Duration(15)  # 15-second timeout
+        # self.overtake_done = False  # Reset the flag
 
-        while not rospy.is_shutdown():
-            if self.overtake_done:
-                rospy.loginfo("Overtaking complete. Returning to lane following.")
-                return 'continue_lane_following'
+        # while not rospy.is_shutdown():
+        #     if self.overtake_done:
+        #         rospy.loginfo("Overtaking complete. Returning to lane following.")
+        #         return 'continue_lane_following'
 
-            if rospy.Time.now() > timeout:
-                rospy.logwarn("Overtaking process timed out!")
-                return 'continue_lane_following'
+        #     if rospy.Time.now() > timeout:
+        #         rospy.logwarn("Overtaking process timed out!")
+        #         return 'continue_lane_following'
 
-            rate.sleep()
+        #     rate.sleep()
+
+        self.is_moving_complete = False
+    
+
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.right.value
+        msg_moving.moving_value_angular = 90
+        msg_moving.moving_value_linear = 0
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'turn_completed'
+
+        rospy.sleep(0.5)
+
+        self.is_moving_complete = False
+
+        # Step 1: Move forward
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.forward.value
+        msg_moving.moving_value_angular = 0
+        msg_moving.moving_value_linear = 0.25
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'turn_completed'
+
+        rospy.sleep(0.5)
+
+        self.is_moving_complete = False
+
+        # Step 2: Turn left
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.left.value
+        msg_moving.moving_value_angular = 90
+        msg_moving.moving_value_linear = 0
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'turn_completed'
+
+        self.is_moving_complete = False
+
+        rospy.sleep(0.5)
+
+        # Step 3: Move forward
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.forward.value
+        msg_moving.moving_value_angular = 0
+        msg_moving.moving_value_linear = 0.82
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'turn_completed'
+
+        self.is_moving_complete = False
+        rospy.sleep(0.5)
+
+
+        # Step 2: Turn left
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.left.value
+        msg_moving.moving_value_angular = 90
+        msg_moving.moving_value_linear = 0
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'turn_completed'
+
+        self.is_moving_complete = False
+        rospy.sleep(0.5)
+
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.forward.value
+        msg_moving.moving_value_angular = 0
+        msg_moving.moving_value_linear = 0.20
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'turn_completed'
+
+        rospy.sleep(0.5)
+        self.is_moving_complete = False
+
+        msg_moving = MovingParam()
+        msg_moving.moving_type = TypeOfMoving.right.value
+        msg_moving.moving_value_angular = 90
+        msg_moving.moving_value_linear = 0
+        self.pub_moving.publish(msg_moving)
+        if not self.wait_for_completion():
+            return 'turn_completed'
+
+        rospy.sleep(0.5)
+        self.is_moving_complete = False
+
+
+        return 'continue_lane_following'
 
 # Define state RoundaboutNavigation
 class RoundaboutNavigation(smach.State):
@@ -911,6 +1125,7 @@ class ReturnToCarPark(smach.State):
                              input_keys=['turn_direction']) 
         self.pub_moving = rospy.Publisher('/control/moving/state', MovingParam, queue_size=10)
         self.sub_moving_complete = rospy.Subscriber('/control/moving/complete', UInt8, self.moving_complete_callback, queue_size=1)
+        self.cmd_vel_pub = rospy.Publisher('/smach_cmd_vel', Twist, queue_size=1)
         self.is_moving_complete = False
 
     def moving_complete_callback(self, data):
@@ -931,17 +1146,45 @@ class ReturnToCarPark(smach.State):
             rate.sleep()
 
     def execute(self, userdata):
-        rospy.loginfo("Navigating back to the car park using move_base...")
+        rospy.loginfo("Navigating back to the car park...")
 
         # Get the turn direction from userdata
         turn_direction = userdata.turn_direction
         rospy.loginfo(f"Received turn direction: {turn_direction}")
 
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(15): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
+
         if turn_direction == "left":
             # Movement for left direction
             rospy.loginfo("Enter carpark for left turn.")
-            
+            self.is_moving_complete = False
             # Step 1: Move forward
+            msg_moving = MovingParam()
+            msg_moving.moving_type = TypeOfMoving.forward.value
+            msg_moving.moving_value_angular = 0
+            msg_moving.moving_value_linear = 0.30
+            self.pub_moving.publish(msg_moving)
+            if not self.wait_for_completion():
+                return 'turn_completed'
+
+            rospy.sleep(0.5)
+            self.is_moving_complete = False
+            # Step 2: Turn left
+            msg_moving = MovingParam()
+            msg_moving.moving_type = TypeOfMoving.left.value
+            msg_moving.moving_value_angular = 90
+            msg_moving.moving_value_linear = 0
+            self.pub_moving.publish(msg_moving)
+            if not self.wait_for_completion():
+                return 'turn_completed'
+
+            rospy.sleep(0.5)
+            self.is_moving_complete = False
+            # Step 3: Move forward
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.forward.value
             msg_moving.moving_value_angular = 0
@@ -950,44 +1193,24 @@ class ReturnToCarPark(smach.State):
             if not self.wait_for_completion():
                 return 'turn_completed'
 
-            rospy.sleep(0.5)
-
-            # Step 2: Turn left
-            msg_moving = MovingParam()
-            msg_moving.moving_type = TypeOfMoving.left.value
-            msg_moving.moving_value_angular = 80
-            msg_moving.moving_value_linear = 0
-            self.pub_moving.publish(msg_moving)
-            if not self.wait_for_completion():
-                return 'turn_completed'
-
-            rospy.sleep(0.5)
-
-            # Step 3: Move forward
-            msg_moving = MovingParam()
-            msg_moving.moving_type = TypeOfMoving.forward.value
-            msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.15
-            self.pub_moving.publish(msg_moving)
-            if not self.wait_for_completion():
-                return 'turn_completed'
-
         elif turn_direction == "right":
             # Movement for right direction
             rospy.loginfo("Enter carpark for right turn.")
-            
-            # Step 1: Move forward
-            msg_moving = MovingParam()
-            msg_moving.moving_type = TypeOfMoving.forward.value
-            msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.35
-            self.pub_moving.publish(msg_moving)
-            if not self.wait_for_completion():
-                return 'turn_completed'
+            self.is_moving_complete = False
+            # Step 1: Move forward  
+            # msg_moving = MovingParam()
+            # msg_moving.moving_type = TypeOfMoving.forward.value
+            # msg_moving.moving_value_angular = 0
+            # msg_moving.moving_value_linear = 0.60
+            # self.pub_moving.publish(msg_moving)
+            # if not self.wait_for_completion():
+            #     return 'turn_completed'
 
-            rospy.sleep(0.5)
-
+            # rospy.sleep(0.5)
+            self.is_moving_complete = False
             # Step 2: Turn right
+            rospy.loginfo("right turn.")
+
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.right.value
             msg_moving.moving_value_angular = 90
@@ -996,13 +1219,15 @@ class ReturnToCarPark(smach.State):
             if not self.wait_for_completion():
                 return 'turn_completed'
 
-            rospy.sleep(0.5)
+            rospy.sleep(0.3)
+            self.is_moving_complete = False
+            rospy.loginfo("sraight")
 
             # Step 3: Move forward
             msg_moving = MovingParam()
             msg_moving.moving_type = TypeOfMoving.forward.value
             msg_moving.moving_value_angular = 0
-            msg_moving.moving_value_linear = 0.25
+            msg_moving.moving_value_linear = 0.38
             self.pub_moving.publish(msg_moving)
             if not self.wait_for_completion():
                 return 'turn_completed'
@@ -1092,14 +1317,17 @@ class GantryInteractionEnter(smach.State):
         
         # Step 2: Move forward through the gantry
         rospy.loginfo("Moving forward through the gantry.")
+        self.is_moving_complete = False
+        
         msg_moving = MovingParam()
         msg_moving.moving_type = TypeOfMoving.forward.value
         msg_moving.moving_value_angular = 0
-        msg_moving.moving_value_linear = 0.25  # Move forward 50 cm
+        msg_moving.moving_value_linear = 0.40  # Move forward 50 cm
         self.pub_moving.publish(msg_moving)
         if not self.wait_for_completion():
             rospy.logerr("Failed to move forward through the gantry.")
             return 'proceed_to_lane'
+        self.is_moving_complete = False
 
         rospy.sleep(0.5)  # Optional pause after movement
 
@@ -1128,24 +1356,24 @@ class ParkInSlot(smach.State):
         # Define movement configurations for parking positions 
         self.movement_config = {
             1: [
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.5},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.03},
                 {'type': TypeOfMoving.right.value, 'angular': 90, 'linear': 0},
-                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.25},
+                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.23},
             ],
             2: [
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.5},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.28},
                 {'type': TypeOfMoving.right.value, 'angular': 90, 'linear': 0},
-                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.5},
+                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.23},
             ],
             3: [
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.22},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.28},
                 {'type': TypeOfMoving.left.value, 'angular': 90, 'linear': 0},
-                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.40},
+                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.45},
             ],
             4: [
-                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.22},
+                {'type': TypeOfMoving.forward.value, 'angular': 0, 'linear': 0.03},
                 {'type': TypeOfMoving.left.value, 'angular': 90, 'linear': 0},
-                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.19},
+                {'type': TypeOfMoving.backward.value, 'angular': 0, 'linear': 0.45},
             ],
         }
     
@@ -1177,8 +1405,10 @@ class ParkInSlot(smach.State):
             rospy.logerr(f"No movement configuration found for parking position {position_param}")
             return 'navigation_failed'
 
+        self.is_moving_complete = False
         # Execute movements sequentially
         for idx, move in enumerate(movements):
+            self.is_moving_complete = False
             rospy.loginfo(f"Step {idx + 1}: Executing movement {move}")
             msg_moving = MovingParam()
             msg_moving.moving_type = move['type']
@@ -1190,6 +1420,7 @@ class ParkInSlot(smach.State):
                 rospy.logerr(f"Failed at step {idx + 1} for parking position {position_param}")
                 return 'navigation_failed'
 
+            self.is_moving_complete = False
             rospy.sleep(0.5)  # Optional pause between movements
 
         rospy.loginfo("Successfully parked.")
@@ -1200,8 +1431,14 @@ class CheckLoopCount(smach.State):
         smach.State.__init__(self, outcomes=['restart', 'finish'],
                              input_keys=['loop_count', 'max_loops'],
                              output_keys=['loop_count'])
+        self.cmd_vel_pub = rospy.Publisher('/smach_cmd_vel', Twist, queue_size=10)
 
     def execute(self, userdata):
+        twist = Twist()
+        twist.linear.x = 0.0
+        for _ in range(20): 
+            self.cmd_vel_pub.publish(twist)
+            rospy.sleep(0.1)
         rospy.loginfo(f"Checking loop count: {userdata.loop_count} / {userdata.max_loops}")
         userdata.loop_count += 1  # Increment the loop count
         if userdata.loop_count < userdata.max_loops:
@@ -1223,11 +1460,11 @@ def main():
 
     # Define userdata for the state machine
     sm.userdata.turn_direction = None # Initialize the variable to store turn direction
-    #sm.userdata.turn_direction = "left"
+    # sm.userdata.turn_direction = "right"
 
     with sm:
         # Start state transitions to NavigateToGantry
-        smach.StateMachine.add('StartState', StartState(), transitions={'proceed_to_localization': 'LocalizationState'})
+        smach.StateMachine.add('StartState', StartState(), transitions={'proceed_to_localization': 'NavigateToBeforeGantry'})
         # smach.StateMachine.add('StartState', StartState(), transitions={'proceed_to_localization': 'LaneFollowing'})
 
         smach.StateMachine.add('LocalizationState', LocalizationState(),

@@ -36,10 +36,10 @@ class ControlMoving():
         self.sub_odom = rospy.Subscriber('/odom', Odometry, self.cbOdom, queue_size=1)
 
         # self.pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size = 1)
-        self.pub_cmd_vel = rospy.Publisher('/control_moving_cmd_vel', Twist, queue_size=1)
+        self.pub_cmd_vel = rospy.Publisher('/control_moving_cmd_vel', Twist, queue_size = 1)
         self.pub_max_vel = rospy.Publisher('/control/max_vel', Float64, queue_size = 1)
-        self.pub_moving_complete = rospy.Publisher('/control/moving/complete', UInt8, queue_size = 1)
         self.pub_turn_error = rospy.Publisher('/turn_error', Float64, queue_size=1)
+        self.pub_moving_complete = rospy.Publisher('/control/moving/complete', UInt8, queue_size = 1)
 
         #moving type enum
         self.TypeOfMoving = Enum('TypeOfMoving', 'idle left right forward backward')
@@ -67,7 +67,7 @@ class ControlMoving():
         self.last_current_theta = 0.0
         self.lastError = 0.0
 
-        self.test = math.radians(90)
+        # self.test = math.radians(90)
      
         msg_pub_max_vel = Float64()
         msg_pub_max_vel.data = 0.05
@@ -151,24 +151,20 @@ class ControlMoving():
 
 
     def turn_left(self, msg):
-        rospy.loginfo("turn_left function is called")
+        # rospy.loginfo("turn_left function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
             self.desired_theta = self.current_theta + math.radians(msg.moving_value_angular)
             self.is_step_start = True
         
         error = self.fnTurn()
-        msg = Float64()
-        msg.data = error
-
-        self.pub_turn_error.publish(msg)
 
         if math.fabs(error) < 0.05:
-            rospy.loginfo("turn_left function is finished")
+            # rospy.loginfo("turn_left function is finished")
             self.step_completed()
 
     def turn_right(self, msg):
-        rospy.loginfo("turn_right function is called")
+        # rospy.loginfo("turn_right function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
             self.desired_theta = self.current_theta - math.radians(msg.moving_value_angular)
@@ -177,12 +173,12 @@ class ControlMoving():
         error = self.fnTurn()
 
         if math.fabs(error) < 0.05:
-            rospy.loginfo("turn_right function is finished")
+            # rospy.loginfo("turn_right function is finished")
             self.step_completed()
 
 
     def go_forward(self, msg):
-        rospy.loginfo("go_forawrd function is called")
+        # rospy.loginfo("go_forawrd function is called")
         if self.is_step_start == False:
             self.lastErorr = 0.0
             self.start_pos_x = self.current_pos_x
@@ -192,12 +188,12 @@ class ControlMoving():
         error = self.fnStraight(msg.moving_value_linear)
 
         if math.fabs(error) < 0.005:
-            rospy.loginfo("go_forward function is finished")
+            # rospy.loginfo("go_forward function is finished")
             self.step_completed()
 
 
     def go_backward(self, msg):
-        rospy.loginfo("go_backward function is called")
+        # rospy.loginfo("go_backward function is called")
         if self.is_step_start == False:
             self.lastError = 0.0
             self.start_pos_x = self.current_pos_x
@@ -207,11 +203,12 @@ class ControlMoving():
         error = self.fnBackStraight(msg.moving_value_linear)
 
         if math.fabs(error) < 0.005:
-            rospy.loginfo("go_backward function is finished")
+            # rospy.loginfo("go_backward function is finished")
             self.step_completed()
 
 
     def fnTurn(self):
+        print('current_theta:',self.current_theta )
         err_theta = self.current_theta - self.desired_theta
         
         # rospy.loginfo("err_theta  desired_theta  current_theta : %f  %f  %f", err_theta, self.desired_theta, self.current_theta)
@@ -227,7 +224,7 @@ class ControlMoving():
         twist.linear.z = 0
         twist.angular.x = 0
         twist.angular.y = 0
-        twist.angular.z = -(angular_z *2)
+        twist.angular.z = -(angular_z * 1.7)
         self.pub_cmd_vel.publish(twist)
 
         # rospy.loginfo("angular_z : %f", angular_z)
@@ -248,7 +245,7 @@ class ControlMoving():
         twist = Twist()
 
         if err_pos < 0:
-            twist.linear.x = 0.1 #0.07
+            twist.linear.x = 0.2 #0.07
         else:
             twist.linear.x = -0.1
 
@@ -304,14 +301,17 @@ class ControlMoving():
         quaternion = (odom_msg.pose.pose.orientation.x, odom_msg.pose.pose.orientation.y, odom_msg.pose.pose.orientation.z, odom_msg.pose.pose.orientation.w)
         self.current_theta = self.euler_from_quaternion(quaternion)
 
-        if (self.current_theta - self.last_current_theta) < -math.pi:
-            self.current_theta = 2. * math.pi + self.current_theta
-            self.last_current_theta = math.pi
-        elif (self.current_theta - self.last_current_theta) > math.pi:
-            self.current_theta = -2. * math.pi + self.current_theta
-            self.last_current_theta = -math.pi
-        else:
-            self.last_current_theta = self.current_theta
+        # if (self.current_theta - self.last_current_theta) < -math.pi:
+        #     self.current_theta = 2. * math.pi + self.current_theta
+        #     self.last_current_theta = math.pi
+        # elif (self.current_theta - self.last_current_theta) > math.pi:
+        #     self.current_theta = -2. * math.pi + self.current_theta
+        #     self.last_current_theta = -math.pi
+        # else:
+        #     self.last_current_theta = self.current_theta
+        
+ 
+        self.last_current_theta = self.current_theta
 
         self.current_pos_x = odom_msg.pose.pose.position.x
         self.current_pos_y = odom_msg.pose.pose.position.y
