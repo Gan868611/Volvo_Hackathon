@@ -246,7 +246,7 @@ class ControlMoving():
         self.lastError = err_pos
 
         twist = Twist()
-
+        #speed
         if err_pos < 0:
             twist.linear.x = 0.1 #0.07
         else:
