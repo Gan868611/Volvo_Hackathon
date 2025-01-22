@@ -15,7 +15,7 @@ class PedestrianSafetyNode:
         self.safety_cmd_vel_pub = rospy.Publisher('/safety_cmd_vel', Twist, queue_size=1)
         
         self.pedestrian_detected = False
-        self.stop_duration = 0.5  # Time to stop when a pedestrian is detected (seconds)
+        self.stop_duration = 2  # Time to stop when a pedestrian is detected (seconds)
 
     def pedestrian_callback(self, msg):
         if msg.data == "pedestrian":

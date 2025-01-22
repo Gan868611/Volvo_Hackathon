@@ -30,8 +30,6 @@ class StuckHandlerNode:
         rospy.Subscriber('/cmd_vel', Twist, self.cmd_vel_callback)
         rospy.Subscriber('/control/moving/complete', UInt8, self.moving_complete_callback, queue_size=1)
         rospy.Subscriber('/starting_direction', String, self.direction_callback)
-        rospy.Subscriber('/parking_number', UInt8, self.parking_num_callback)
-        rospy.Subscriber('/override_state', UInt8, self.override_state_callback)
 
         self.is_moving_complete = False
         self.check_stuck_enabled = False  # Flag to enable or disable stuck checking
@@ -46,11 +44,10 @@ class StuckHandlerNode:
         self.linear_accumulated = 0
         self.angular_accumulated = 0
         self.pending_movements = []  # Queue to handle multi-step movements
+        self.published = False
         self.odom_count = 0
         self.executing = False
         self.starting_direction = None
-        self.parking_received = False
-        self.parking_number = None
 
         # Stuck detection threshold
         self.STUCK_DURATION = rospy.Duration(3)
@@ -67,7 +64,7 @@ class StuckHandlerNode:
             if self.starting_direction is not None:
                 if not self.start_processing:
                     rospy.loginfo("Lane detection started, initializing node...")
-                    time.sleep(1)
+                    time.sleep(20)
                     self.start_processing = True
                 rospy.loginfo("Stuck checking resumed.")
                 self.check_stuck_enabled = True
@@ -77,22 +74,9 @@ class StuckHandlerNode:
         elif not msg.data:
             rospy.loginfo("Stuck checking paused.")
             self.check_stuck_enabled = False
-    
-    def parking_num_callback(self, msg):
-        self.parking_received = True
-        self.parking_number = msg.data
-        rospy.loginfo(f"parking number {self.parking_number}")
-
-    def override_state_callback(self, msg):
-        self.switch_to_next_state(msg.data)
 
     def odom_callback(self, msg):
         """Track movement based on odometry data."""
-        if self.parking_received:
-            self.first_orientation = self.get_yaw_from_quaternion(msg.pose.pose.orientation)
-            rospy.loginfo("first orientation set")
-            self.parking_received = False
-
         if not self.start_processing:
             return
 
@@ -103,21 +87,7 @@ class StuckHandlerNode:
     
         if self.initial_position is None:
             self.initial_position = msg.pose.pose.position
-            if self.current_state == 1:
-                if self.starting_direction == 'left':
-                    if self.parking_number == 1 or self.parking_number == 2:
-                        self.initial_orientation = self.first_orientation
-                    elif self.parking_number == 3 or self.parking_number == 4:
-                        new_yaw = self.first_orientation + math.pi
-                        self.initial_orientation = math.atan2(math.sin(new_yaw), math.cos(new_yaw))
-                elif self.starting_direction == 'right':
-                    if self.parking_number == 3 or self.parking_number == 4:
-                        self.initial_orientation = self.first_orientation
-                    elif self.parking_number == 1 or self.parking_number == 2:
-                        new_yaw = self.first_orientation - math.pi
-                        self.initial_orientation = math.atan2(math.sin(new_yaw), math.cos(new_yaw))
-            else:
-                self.initial_orientation = self.get_yaw_from_quaternion(msg.pose.pose.orientation)
+            self.initial_orientation = self.get_yaw_from_quaternion(msg.pose.pose.orientation)
             return
 
         # Compute linear displacement
@@ -144,7 +114,6 @@ class StuckHandlerNode:
         """Get starting direction"""
         self.starting_direction = msg.data
         self.current_state = 1
-        rospy.loginfo(f"lane direction {self.starting_direction}")
 
     def get_yaw_from_quaternion(self, orientation):
         """Convert quaternion to yaw (angle)."""
@@ -187,14 +156,13 @@ class StuckHandlerNode:
             elif self.current_state == 3 and self.linear_accumulated >= 0.6: # Towards triangle exit
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.35))
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 90, 0))
-                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.05))
-                # self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
                 self.switch_to_next_state(6)
             
             elif self.current_state == 6 and self.angular_accumulated >= 0.78:
                 self.switch_to_next_state(4)
 
-            elif self.current_state == 4 and self.linear_accumulated >= 0.25: # only start checking when robot is in roundabout
+            elif self.current_state == 4 and self.linear_accumulated >= 0.3: # only start checking when robot is in roundabout
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.45))
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 45, 0))
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.5))
@@ -204,42 +172,41 @@ class StuckHandlerNode:
                 # elif self.angular_accumulated >= 1.57: # robot manage to exit roundabout
                 self.switch_to_next_state(5)
 
-            elif self.current_state == 5 and self.linear_accumulated >= 4: # after roundabout exit towards sharp right turn
+            elif self.current_state == 5 and self.linear_accumulated >= 10: # after roundabout exit towards sharp right turn
                 self.switch_to_next_state(None)  # All states achieved
                 self.start_processing = False # Stop processing
                 self.starting_direction = None
 
         elif self.starting_direction == 'right':
-            # TEST THIS
-            if self.current_state == 1 and self.linear_accumulated >= 3.3:
-                if self.angular_accumulated <= -3.05:
-                    self.switch_to_next_state(2)
+            if self.current_state == 1 and self.linear_accumulated >= 1.9: # after the twist and turns
+                if self.angular_accumulated >= -1.6 and self.angular_accumulated <= -1.5:
+                    self.switch_to_next_state(11)
             
-            # if self.current_state == 11 and self.linear_accumulated >= 0.5:
-            #     if self.angular_accumulated >= -1.65 and self.angular_accumulated <= -1.5:
-            #         self.switch_to_next_state(2)
+            if self.current_state == 11 and self.linear_accumulated >= 1:
+                if self.angular_accumulated >= -1.6 and self.angular_accumulated <= -1.5:
+                    self.switch_to_next_state(2)
 
-            elif self.current_state == 2 and self.angular_accumulated >= 0.78: 
+            elif self.current_state == 2 and self.angular_accumulated >= 0.78: # Until Triangle Sharp right turn
                 self.switch_to_next_state(22)
 
             elif self.current_state == 22 and self.linear_accumulated >= 0.03:
                 self.switch_to_next_state(4)
-                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.26))
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.36))
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 50, 0))
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.36))
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 35, 0))
 
+            # elif self.current_state == 3 and self.linear_accumulated >= 0.5: # Towards roundabout entry
+            #     if self.angular_accumulated <= -0.17:
+            #         self.switch_to_next_state(4)
+
             elif self.current_state == 4 and self.linear_accumulated >= 1.43: # robot in roundabout
-                if self.angular_accumulated <= -3:
-                    # TEST THIS (CHANGE IF GOT TIME)
-                    self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 20, 0))
+                if self.angular_accumulated <= -3: # robot failed to exit roundabout
                     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.4))
                     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 40, 0))
-
-                    # self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.4))
-                    # self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 35, 0))
-
                     self.switch_to_next_state(55)
+                # elif self.angular_accumulated <= -2.35: # robot manage to exit roundabout
+                #     self.switch_to_next_state(5)
 
             elif self.current_state == 55 and self.angular_accumulated >= 0.6: 
                 self.switch_to_next_state(5)
@@ -250,20 +217,8 @@ class StuckHandlerNode:
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 90, 0))
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.25))
 
-            # TEST THIS
-            elif self.current_state == 6 and self.angular_accumulated <= -0.43 and self.linear_accumulated >= 0.5:
-                self.switch_to_next_state(66)
-
-            elif self.current_state == 66 and self.linear_accumulated >= 0.4:
-                self.switch_to_next_state(67)
-                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_FORWARD, 0, 0.48))
-                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 90, 0))
-
-            elif self.current_state == 67 and self.angular_accumulated <= -0.88: #towards u turn exit
+            elif self.current_state == 6 and self.angular_accumulated <= -1.3: #towards u turn exit
                 self.switch_to_next_state(7)
-
-            # elif self.current_state == 6 and self.angular_accumulated <= -1.3: #towards u turn exit
-            #     self.switch_to_next_state(7)
 
             elif self.current_state == 7 and self.linear_accumulated >= 1.85: # towards parking
                 self.right_park_pub.publish('start')
@@ -292,41 +247,41 @@ class StuckHandlerNode:
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
 
             elif self.current_state == 2:
-                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 15, 0))
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 45, 0))
 
-            # elif self.current_state == 3:  # Triangle exit left turn
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_BACKWARD, 0, 0.05))
+            elif self.current_state == 3:  # Triangle exit left turn
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_BACKWARD, 0, 0.05))
 
-            # elif self.current_state == 4:  # Inside roundabout
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
-
-            elif self.current_state == 5:  # Until sharp right turn
+            elif self.current_state == 4:  # Inside roundabout
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
 
-        elif self.starting_direction == 'right':
-            # if self.current_state == 1:
-                # self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
+            # elif self.current_state == 5:  # Until sharp right turn
+                # self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 30, 0))
 
-            if self.current_state == 2:
+        elif self.starting_direction == 'right':
+            if self.current_state == 1:
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
+
+            elif self.current_state == 2:
                 self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 60, 0))
 
-            # elif self.current_state == 3:  
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
+            elif self.current_state == 3:  
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
 
-            # elif self.current_state == 4:
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
+            elif self.current_state == 4:
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
 
-            # elif self.current_state == 5:
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
+            elif self.current_state == 5:
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
 
-            # elif self.current_state == 6:
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 20, 0))
+            elif self.current_state == 6:
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 20, 0))
 
-            # elif self.current_state == 7:
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
+            elif self.current_state == 7:
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_LEFT, 10, 0))
 
-            # elif self.current_state == 8:
-            #     self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 10, 0))
+            elif self.current_state == 8:
+                self.pending_movements.append(self.create_movement(self.MOVING_TYPE_RIGHT, 10, 0))
 
     def create_movement(self, moving_type, angular, linear):
         """Helper function to create movement commands."""

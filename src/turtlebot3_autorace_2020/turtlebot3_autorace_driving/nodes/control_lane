@@ -26,13 +26,15 @@ from geometry_msgs.msg import Twist
 
 class ControlLane():
     def __init__(self):
+        rospy.sleep(1)
         self.sub_lane = rospy.Subscriber('/control/lane', Float64, self.cbFollowLane, queue_size = 1)
         self.sub_max_vel = rospy.Subscriber('/control/max_vel', Float64, self.cbGetMaxVel, queue_size = 1)
         self.pub_cmd_vel = rospy.Publisher('/control/cmd_vel', Twist, queue_size = 1)
 
         self.lastError = 0
         self.MAX_VEL = 0.7
-        self.max_vel = 0.05
+        #speed
+        self.max_vel = 0.07
 
         rospy.on_shutdown(self.fnShutDown)
 

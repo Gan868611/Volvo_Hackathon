@@ -10,10 +10,10 @@ detect:
       lightness_h: 255
     white:
       hue_l: 0
-      hue_h: 104
+      hue_h: 179
       saturation_l: 0
       saturation_h: 40
-      lightness_l: 200
+      lightness_l: 236
       lightness_h: 255
     blue:
       hue_l: 63

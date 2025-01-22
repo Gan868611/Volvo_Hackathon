@@ -629,7 +629,7 @@ class DetectLane():
                 cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
 
             if right_fraction > 9000 and left_fraction <= 9000:
-                centerx = np.subtract(self.right_fitx, 220)
+                centerx = np.subtract(self.right_fitx, 250)
                 centerx = np.add(centerx, offset)
                 # final_centerx = centerx.item(599)
                 pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
@@ -637,7 +637,7 @@ class DetectLane():
                 cv2.polylines(color_warp_lines, np.int_([pts_center]), isClosed=False, color=(0, 255, 255), thickness=12)
 
             if right_fraction <= 9000 and left_fraction > 9000:
-                centerx = np.add(self.left_fitx, 265)
+                centerx = np.add(self.left_fitx, 310)
                 centerx = np.add(centerx, offset)
                 # final_centerx = centerx.item(50)
                 pts_center = np.array([np.transpose(np.vstack([centerx, ploty]))])
@@ -684,7 +684,8 @@ class DetectLane():
                 if right_outlier_fraction > 6000:
                     self.pub_max_vel.publish(0.01)
                 elif left_outlier_fraction < 13000:
-                    self.pub_max_vel.publish(0.05)
+                    #speed
+                    self.pub_max_vel.publish(0.07)
                 elif left_outlier_fraction >= 13000:
                     self.pub_max_vel.publish(0.01)
                 
